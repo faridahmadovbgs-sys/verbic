@@ -9,9 +9,11 @@ class KeyboardMonitor:
         self._lock = threading.Lock()
         self._on_hotkey = on_hotkey
         self._listener = None
-        self._hotkey_keys = {keyboard.Key.ctrl_l, keyboard.Key.shift, keyboard.KeyCode.from_char("g")}
+        self._ctrl_pressed = False
+        self._shift_pressed = False
         self._pressed_keys = set()
         self._mouse_listener = None
+        self._paused = False
 
     def add_char(self, char):
         with self._lock:
@@ -50,27 +52,58 @@ class KeyboardMonitor:
             self._char_count = 0
             return text, count
 
+    def pause(self):
+        self._paused = True
+
+    def resume(self):
+        self._paused = False
+        self.reset_buffer()
+
     def _on_press(self, key):
-        self._pressed_keys.add(key)
-        if self._hotkey_keys.issubset(self._pressed_keys):
-            self._on_hotkey()
+        if self._paused:
             return
+        if key in (keyboard.Key.ctrl_l, keyboard.Key.ctrl_r):
+            self._ctrl_pressed = True
+        elif key in (keyboard.Key.shift, keyboard.Key.shift_l, keyboard.Key.shift_r):
+            self._shift_pressed = True
+
+        if self._ctrl_pressed and self._shift_pressed:
+            try:
+                if hasattr(key, "char") and key.char == "\x07":
+                    self._on_hotkey()
+                    return
+                if hasattr(key, "vk") and key.vk == 71:
+                    self._on_hotkey()
+                    return
+            except AttributeError:
+                pass
+            if key == keyboard.KeyCode.from_char("g") or key == keyboard.KeyCode.from_char("G"):
+                self._on_hotkey()
+                return
 
         try:
             if hasattr(key, "char") and key.char is not None:
-                self.add_char(key.char)
+                if not self._ctrl_pressed:
+                    self.add_char(key.char)
         except AttributeError:
             pass
 
-        if key == keyboard.Key.enter:
+        if key == keyboard.Key.space:
+            self.add_char(" ")
+        elif key == keyboard.Key.enter:
             self.add_newline()
         elif key == keyboard.Key.backspace:
             self.handle_backspace()
+        elif key == keyboard.Key.tab:
+            self.add_char("\t")
         elif key in (keyboard.Key.left, keyboard.Key.right, keyboard.Key.up, keyboard.Key.down):
             self.reset_buffer()
 
     def _on_release(self, key):
-        self._pressed_keys.discard(key)
+        if key in (keyboard.Key.ctrl_l, keyboard.Key.ctrl_r):
+            self._ctrl_pressed = False
+        elif key in (keyboard.Key.shift, keyboard.Key.shift_l, keyboard.Key.shift_r):
+            self._shift_pressed = False
 
     def _on_click(self, x, y, button, pressed):
         if pressed:

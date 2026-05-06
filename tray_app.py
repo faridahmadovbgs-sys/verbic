@@ -1,4 +1,5 @@
 import pystray
+import subprocess
 from PIL import Image
 from keyboard_monitor import KeyboardMonitor
 from text_replacer import TextReplacer
@@ -17,7 +18,7 @@ class GrammarTrayApp:
             "concise": False,
             "expand": False,
         }
-        self.ollama = OllamaClient()
+        self.ollama = OllamaClient(model="llama3.1:8b")
         self.prompt_builder = PromptBuilder()
         self.replacer = TextReplacer()
         self.monitor = KeyboardMonitor(on_hotkey=self._on_hotkey)
@@ -44,14 +45,68 @@ class GrammarTrayApp:
 
     def _on_hotkey(self):
         text, char_count = self.monitor.consume_buffer()
-        if not text.strip():
-            return
 
-        thread = threading.Thread(target=self._process_text, args=(text, char_count), daemon=True)
+        use_selection = False
+        if not text.strip():
+            text = self._get_selected_text()
+            if not text or not text.strip():
+                return
+            char_count = len(text)
+            use_selection = True
+
+        context = self._get_clipboard_context()
+
+        thread = threading.Thread(target=self._process_text, args=(text, char_count, use_selection, context), daemon=True)
         thread.start()
 
-    def _process_text(self, text, char_count):
-        prompt = self.prompt_builder.build(text, self.options)
+    def _get_clipboard_context(self):
+        try:
+            no_window = subprocess.CREATE_NO_WINDOW
+            result = subprocess.run(
+                ["powershell", "-command", "Get-Clipboard"],
+                capture_output=True, text=True, timeout=2,
+                creationflags=no_window,
+            )
+            clip = result.stdout.rstrip("\r\n")
+            return clip if clip else None
+        except Exception:
+            return None
+
+    def _get_selected_text(self):
+        import subprocess
+        import time
+        try:
+            from pynput.keyboard import Controller, Key
+            kb = Controller()
+            no_window = subprocess.CREATE_NO_WINDOW
+
+            old_clip = subprocess.run(
+                ["powershell", "-command", "Get-Clipboard"],
+                capture_output=True, text=True, timeout=2,
+                creationflags=no_window,
+            ).stdout.rstrip("\r\n")
+
+            kb.press(Key.ctrl)
+            kb.press("c")
+            kb.release("c")
+            kb.release(Key.ctrl)
+            time.sleep(0.15)
+
+            result = subprocess.run(
+                ["powershell", "-command", "Get-Clipboard"],
+                capture_output=True, text=True, timeout=2,
+                creationflags=no_window,
+            )
+            new_clip = result.stdout.rstrip("\r\n")
+
+            if new_clip and new_clip != old_clip:
+                return new_clip
+            return new_clip if new_clip else None
+        except Exception:
+            return None
+
+    def _process_text(self, text, char_count, use_selection=False, context=None):
+        prompt = self.prompt_builder.build(text, self.options, context=context)
         corrected = self.ollama.generate(prompt)
 
         if corrected is None:
@@ -62,7 +117,11 @@ class GrammarTrayApp:
             self._notify("Grammar Tool", "Text looks good — no changes needed.")
             return
 
-        self.replacer.replace_text(char_count, corrected)
+        self.monitor.pause()
+        try:
+            self.replacer.replace_text(char_count, corrected)
+        finally:
+            self.monitor.resume()
 
     def _notify(self, title, message):
         try:
@@ -85,7 +144,11 @@ class GrammarTrayApp:
         icon.stop()
 
     def run(self):
-        image = Image.open("icon.png")
+        import os
+        import sys
+        base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+        icon_path = os.path.join(base_path, "icon.png")
+        image = Image.open(icon_path)
 
         menu = pystray.Menu(
             pystray.MenuItem("Fix Grammar", self._toggle_option("grammar"), checked=self._is_checked("grammar")),
