@@ -4,8 +4,10 @@ from PIL import Image
 from keyboard_monitor import KeyboardMonitor
 from text_replacer import TextReplacer
 from ollama_client import OllamaClient
+from openai_client import OpenAIClient
 from prompt_builder import PromptBuilder
 from settings_window import SettingsWindow
+from config import load_config, save_config
 import threading
 
 
@@ -18,11 +20,24 @@ class GrammarTrayApp:
             "concise": False,
             "expand": False,
         }
-        self.ollama = OllamaClient(model="llama3.1:8b")
+        self._config = load_config()
+        self._build_client()
         self.prompt_builder = PromptBuilder()
         self.replacer = TextReplacer()
         self.monitor = KeyboardMonitor(on_hotkey=self._on_hotkey)
         self._icon = None
+
+    def _build_client(self):
+        provider = self._config.get("provider", "ollama")
+        if provider == "openai":
+            self.client = OpenAIClient(
+                api_key=self._config.get("api_key", ""),
+                model=self._config.get("openai_model", "gpt-4o-mini"),
+            )
+        else:
+            self.client = OllamaClient(
+                model=self._config.get("ollama_model", "llama3.1:8b"),
+            )
 
     def _toggle_option(self, name):
         def handler(icon, item):
@@ -44,6 +59,7 @@ class GrammarTrayApp:
         return handler
 
     def _on_hotkey(self):
+        print("[Hotkey] Ctrl+Shift+G triggered")
         text, char_count = self.monitor.consume_buffer()
 
         use_selection = False
@@ -107,10 +123,14 @@ class GrammarTrayApp:
 
     def _process_text(self, text, char_count, use_selection=False, context=None):
         prompt = self.prompt_builder.build(text, self.options, context=context)
-        corrected = self.ollama.generate(prompt)
+        corrected = self.client.generate(prompt)
 
         if corrected is None:
-            self._notify("Grammar Tool", "Ollama is not running. Please start it.")
+            provider = self._config.get("provider", "ollama")
+            if provider == "openai":
+                self._notify("Grammar Tool", "OpenAI request failed. Check your API key in Settings.")
+            else:
+                self._notify("Grammar Tool", "Ollama is not running. Please start it.")
             return
 
         if corrected.strip() == text.strip():
@@ -132,16 +152,22 @@ class GrammarTrayApp:
             pass
 
     def _open_settings(self, icon, item):
-        def on_save(model):
-            self.ollama = OllamaClient(model=model)
+        def on_save(new_config):
+            self._config.update(new_config)
+            save_config(self._config)
+            self._build_client()
 
-        settings = SettingsWindow(self.ollama.model, on_save)
+        settings = SettingsWindow(self._config, on_save)
         thread = threading.Thread(target=settings.open, daemon=True)
         thread.start()
 
     def _quit(self, icon, item):
         self.monitor.stop()
         icon.stop()
+
+    def _provider_label(self, item):
+        provider = self._config.get("provider", "ollama")
+        return f"Provider: {provider}"
 
     def run(self):
         import os
@@ -157,6 +183,7 @@ class GrammarTrayApp:
             pystray.MenuItem("Concise", self._toggle_option("concise"), checked=self._is_checked("concise")),
             pystray.MenuItem("Expand", self._toggle_option("expand"), checked=self._is_checked("expand")),
             pystray.Menu.SEPARATOR,
+            pystray.MenuItem(self._provider_label, None, enabled=False),
             pystray.MenuItem("Settings", self._open_settings),
             pystray.MenuItem("Quit", self._quit),
         )
