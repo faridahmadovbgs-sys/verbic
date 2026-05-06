@@ -1,5 +1,5 @@
 import threading
-from pynput import keyboard
+from pynput import keyboard, mouse
 
 
 class KeyboardMonitor:
@@ -11,6 +11,7 @@ class KeyboardMonitor:
         self._listener = None
         self._hotkey_keys = {keyboard.Key.ctrl_l, keyboard.Key.shift, keyboard.KeyCode.from_char("g")}
         self._pressed_keys = set()
+        self._mouse_listener = None
 
     def add_char(self, char):
         with self._lock:
@@ -71,11 +72,20 @@ class KeyboardMonitor:
     def _on_release(self, key):
         self._pressed_keys.discard(key)
 
+    def _on_click(self, x, y, button, pressed):
+        if pressed:
+            self.reset_buffer()
+
     def start(self):
         self._listener = keyboard.Listener(on_press=self._on_press, on_release=self._on_release)
         self._listener.daemon = True
         self._listener.start()
+        self._mouse_listener = mouse.Listener(on_click=self._on_click)
+        self._mouse_listener.daemon = True
+        self._mouse_listener.start()
 
     def stop(self):
         if self._listener:
             self._listener.stop()
+        if self._mouse_listener:
+            self._mouse_listener.stop()
