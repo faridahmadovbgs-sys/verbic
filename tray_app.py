@@ -4,6 +4,7 @@ from keyboard_monitor import KeyboardMonitor
 from text_replacer import TextReplacer
 from ollama_client import OllamaClient
 from prompt_builder import PromptBuilder
+from settings_window import SettingsWindow
 import threading
 
 
@@ -71,6 +72,14 @@ class GrammarTrayApp:
         except Exception:
             pass
 
+    def _open_settings(self, icon, item):
+        def on_save(model):
+            self.ollama = OllamaClient(model=model)
+
+        settings = SettingsWindow(self.ollama.model, on_save)
+        thread = threading.Thread(target=settings.open, daemon=True)
+        thread.start()
+
     def _quit(self, icon, item):
         self.monitor.stop()
         icon.stop()
@@ -85,6 +94,7 @@ class GrammarTrayApp:
             pystray.MenuItem("Concise", self._toggle_option("concise"), checked=self._is_checked("concise")),
             pystray.MenuItem("Expand", self._toggle_option("expand"), checked=self._is_checked("expand")),
             pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Settings", self._open_settings),
             pystray.MenuItem("Quit", self._quit),
         )
 
