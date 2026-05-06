@@ -67,6 +67,19 @@ class KeyboardMonitor:
         elif key in (keyboard.Key.shift, keyboard.Key.shift_l, keyboard.Key.shift_r):
             self._shift_pressed = True
 
+        # Ctrl+` (backtick/tilde)
+        if self._ctrl_pressed:
+            try:
+                if hasattr(key, "char") and key.char == "`":
+                    self._on_hotkey()
+                    return
+                if hasattr(key, "vk") and key.vk == 192:
+                    self._on_hotkey()
+                    return
+            except AttributeError:
+                pass
+
+        # Ctrl+Shift+G
         if self._ctrl_pressed and self._shift_pressed:
             try:
                 if hasattr(key, "char") and key.char == "\x07":

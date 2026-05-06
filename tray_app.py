@@ -4,10 +4,11 @@ from PIL import Image
 from keyboard_monitor import KeyboardMonitor
 from text_replacer import TextReplacer
 from ollama_client import OllamaClient
-from openai_client import OpenAIClient
+from openai_client import OpenAICompatibleClient
+from claude_client import ClaudeClient
 from prompt_builder import PromptBuilder
 from settings_window import SettingsWindow
-from config import load_config, save_config
+from config import load_config, save_config, PROVIDERS
 import threading
 
 
@@ -29,14 +30,25 @@ class GrammarTrayApp:
 
     def _build_client(self):
         provider = self._config.get("provider", "ollama")
-        if provider == "openai":
-            self.client = OpenAIClient(
-                api_key=self._config.get("api_key", ""),
-                model=self._config.get("openai_model", "gpt-4o-mini"),
+        provider_config = self._config.get("providers", {}).get(provider, {})
+
+        if provider == "ollama":
+            self.client = OllamaClient(
+                model=provider_config.get("model", "llama3.1:8b"),
+            )
+        elif provider == "claude":
+            self.client = ClaudeClient(
+                api_key=provider_config.get("api_key", ""),
+                model=provider_config.get("model", "claude-sonnet-4-20250514"),
             )
         else:
-            self.client = OllamaClient(
-                model=self._config.get("ollama_model", "llama3.1:8b"),
+            info = PROVIDERS.get(provider, PROVIDERS["custom"])
+            base_url = provider_config.get("base_url") or info.get("base_url") or ""
+            self.client = OpenAICompatibleClient(
+                api_key=provider_config.get("api_key", ""),
+                model=provider_config.get("model", info.get("default_model", "")),
+                base_url=base_url,
+                provider_name=info.get("label", provider),
             )
 
     def _toggle_option(self, name):
@@ -127,10 +139,11 @@ class GrammarTrayApp:
 
         if corrected is None:
             provider = self._config.get("provider", "ollama")
-            if provider == "openai":
-                self._notify("Grammar Tool", "OpenAI request failed. Check your API key in Settings.")
-            else:
+            if provider == "ollama":
                 self._notify("Grammar Tool", "Ollama is not running. Please start it.")
+            else:
+                label = PROVIDERS.get(provider, {}).get("label", provider)
+                self._notify("Grammar Tool", f"{label} request failed. Check Settings.")
             return
 
         if corrected.strip() == text.strip():
@@ -153,7 +166,7 @@ class GrammarTrayApp:
 
     def _open_settings(self, icon, item):
         def on_save(new_config):
-            self._config.update(new_config)
+            self._config = new_config
             save_config(self._config)
             self._build_client()
 
@@ -167,7 +180,8 @@ class GrammarTrayApp:
 
     def _provider_label(self, item):
         provider = self._config.get("provider", "ollama")
-        return f"Provider: {provider}"
+        label = PROVIDERS.get(provider, {}).get("label", provider)
+        return f"Provider: {label}"
 
     def run(self):
         import os
