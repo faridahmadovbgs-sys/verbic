@@ -65,9 +65,20 @@ def _config_path():
     return os.path.join(base, "config.json")
 
 
+DEFAULT_OPTIONS = {
+    "grammar": True,
+    "formal": False,
+    "casual": False,
+    "concise": False,
+    "expand": False,
+    "auto_suggest": True,
+}
+
+
 def _default_config():
     return {
         "provider": "ollama",
+        "options": dict(DEFAULT_OPTIONS),
         "providers": {
             name: {"model": info["default_model"], "api_key": "", "base_url": info["base_url"] or ""}
             for name, info in PROVIDERS.items()
@@ -88,6 +99,13 @@ def load_config():
         for name in PROVIDERS:
             if name not in data.get("providers", {}):
                 data["providers"][name] = defaults["providers"][name]
+        # Backfill missing toggle states from defaults so older configs upgrade cleanly.
+        saved_options = data.get("options") or {}
+        merged_options = dict(DEFAULT_OPTIONS)
+        for k, v in saved_options.items():
+            if k in merged_options and isinstance(v, bool):
+                merged_options[k] = v
+        data["options"] = merged_options
         return data
     except Exception:
         return defaults

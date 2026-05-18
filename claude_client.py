@@ -1,4 +1,5 @@
 import requests
+from text_utils import clean_llm_output
 
 
 class ClaudeClient:
@@ -8,10 +9,8 @@ class ClaudeClient:
 
     def generate(self, prompt):
         if not self.api_key:
-            print("[Claude] No API key configured")
             return None
         try:
-            print(f"[Claude] Sending request to {self.model}...")
             response = requests.post(
                 "https://api.anthropic.com/v1/messages",
                 headers={
@@ -27,11 +26,7 @@ class ClaudeClient:
                 timeout=30,
             )
             if response.status_code == 200:
-                result = response.json()["content"][0]["text"].strip()
-                print(f"[Claude] Got response: {result[:80]}...")
-                return result
-            print(f"[Claude] Error {response.status_code}: {response.text[:200]}")
+                return clean_llm_output(response.json()["content"][0]["text"].strip())
             return None
-        except Exception as e:
-            print(f"[Claude] Exception: {e}")
+        except Exception:
             return None

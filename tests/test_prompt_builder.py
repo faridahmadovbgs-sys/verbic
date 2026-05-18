@@ -56,14 +56,14 @@ class TestPromptBuilder(unittest.TestCase):
         options = {"grammar": True, "formal": False, "casual": False, "concise": False, "expand": False}
         prompt = builder.build("test", options)
 
-        self.assertIn("Return ONLY the corrected text", prompt)
+        self.assertIn("Output ONLY the corrected", prompt)
 
     def test_empty_text(self):
         builder = PromptBuilder()
         options = {"grammar": True, "formal": False, "casual": False, "concise": False, "expand": False}
         prompt = builder.build("", options)
 
-        self.assertIn('"""\n\n"""', prompt)
+        self.assertIn("<<<\n\n>>>", prompt)
 
 
 if __name__ == "__main__":

@@ -8,3 +8,5 @@ dist/
 *.ico
 installer_output/
 config.json
+.claude/
+*.log

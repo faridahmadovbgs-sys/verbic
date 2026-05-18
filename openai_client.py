@@ -1,4 +1,5 @@
 import requests
+from text_utils import clean_llm_output
 
 
 class OpenAICompatibleClient:
@@ -10,10 +11,8 @@ class OpenAICompatibleClient:
 
     def generate(self, prompt):
         if not self.api_key:
-            print(f"[{self.provider_name}] No API key configured")
             return None
         try:
-            print(f"[{self.provider_name}] Sending request to {self.model}...")
             response = requests.post(
                 f"{self.base_url}/chat/completions",
                 headers={
@@ -28,11 +27,7 @@ class OpenAICompatibleClient:
                 timeout=30,
             )
             if response.status_code == 200:
-                result = response.json()["choices"][0]["message"]["content"].strip()
-                print(f"[{self.provider_name}] Got response: {result[:80]}...")
-                return result
-            print(f"[{self.provider_name}] Error {response.status_code}: {response.text[:200]}")
+                return clean_llm_output(response.json()["choices"][0]["message"]["content"].strip())
             return None
-        except Exception as e:
-            print(f"[{self.provider_name}] Exception: {e}")
+        except Exception:
             return None

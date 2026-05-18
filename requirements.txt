@@ -4,3 +4,4 @@ Pillow==11.1.0
 requests==2.32.3
 win10toast==0.9
 pytest==8.3.4
+uiautomation==2.0.20

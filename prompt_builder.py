@@ -18,17 +18,22 @@ class PromptBuilder:
         context_block = ""
         if context and context.strip() != text.strip():
             context_block = (
-                f"The user copied the following conversation/context before typing their reply. "
-                f"Use it to understand tone, topic, and intent — but do NOT include it in your output.\n\n"
-                f"Conversation context:\n"
+                f"Surrounding document for tone/topic reference only. "
+                f"DO NOT correct, repeat, or include any part of this in your output.\n\n"
+                f"Surrounding context:\n"
                 f'"""\n{context}\n"""\n\n'
             )
 
         return (
-            f"You are a text correction assistant. Apply the following transformations to the text below:\n"
+            f"You are a text correction assistant. Apply these transformations:\n"
             f"{instruction_block}\n\n"
             f"{context_block}"
-            f"IMPORTANT: Return ONLY the corrected text. No explanations, no quotes, no prefixes.\n\n"
-            f"Text to correct:\n"
-            f'"""\n{text}\n"""'
+            f"CRITICAL RULES:\n"
+            f"- Output ONLY the corrected text. Plain text only.\n"
+            f"- Do NOT wrap your answer in quotes, triple quotes, code fences, or any delimiter.\n"
+            f"- Do NOT add preambles like \"Here is\", \"The corrected version\", or any explanation.\n"
+            f"- Do NOT include any surrounding context.\n"
+            f"- Output length should be similar to input length.\n\n"
+            f"Snippet to correct:\n"
+            f"<<<\n{text}\n>>>"
         )

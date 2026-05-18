@@ -18,14 +18,14 @@ class TextReplacer:
 
         time.sleep(0.15)
 
+        self._keyboard.press(Key.shift)
         for _ in range(char_count):
-            self._keyboard.press(Key.shift)
             self._keyboard.press(Key.left)
             self._keyboard.release(Key.left)
-            self._keyboard.release(Key.shift)
-            time.sleep(0.003)
+            time.sleep(0.02)
+        self._keyboard.release(Key.shift)
 
-        time.sleep(0.05)
+        time.sleep(0.12)
 
         old_clip = self._get_clipboard()
 
@@ -43,6 +43,33 @@ class TextReplacer:
 
     def paste_over_selection(self, corrected_text):
         self._do_paste_over(corrected_text)
+
+    def replace_all(self, corrected_text):
+        self._do_replace_all(corrected_text)
+
+    def _do_replace_all(self, corrected_text):
+        time.sleep(0.15)
+
+        self._keyboard.press(Key.ctrl)
+        self._keyboard.press("a")
+        self._keyboard.release("a")
+        self._keyboard.release(Key.ctrl)
+
+        time.sleep(0.12)
+
+        old_clip = self._get_clipboard()
+
+        self._set_clipboard(corrected_text)
+        time.sleep(0.05)
+
+        self._keyboard.press(Key.ctrl)
+        self._keyboard.press("v")
+        self._keyboard.release("v")
+        self._keyboard.release(Key.ctrl)
+
+        time.sleep(0.2)
+        if old_clip is not None:
+            self._set_clipboard(old_clip)
 
     def _do_paste_over(self, corrected_text):
         time.sleep(0.15)

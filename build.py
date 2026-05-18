@@ -20,6 +20,7 @@ def build_exe():
         "--onefile",
         "--noconsole",
         "--icon=icon.ico",
+        "--version-file=version_info.txt",
         "--add-data", "icon.png;.",
         "--name", "GrammarTool",
         "main.py",
