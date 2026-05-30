@@ -1,15 +1,16 @@
+from config import TONE_PROMPTS
+
+
 class PromptBuilder:
     def build(self, text, options, context=None):
         instructions = []
 
         if options.get("grammar"):
             instructions.append("- Fix all grammar, spelling, and punctuation errors")
-        if options.get("formal"):
-            instructions.append("- Rewrite in a formal, professional tone")
-        if options.get("casual"):
-            instructions.append("- Rewrite in a casual, friendly, conversational tone")
-        if options.get("concise"):
-            instructions.append("- Make the text more concise while keeping the meaning")
+        # Tones are mutually exclusive in the UI, but emit whatever is enabled.
+        for key, prompt in TONE_PROMPTS.items():
+            if options.get(key):
+                instructions.append(f"- {prompt}")
         if options.get("expand"):
             instructions.append("- Elaborate and expand the text with more detail")
 

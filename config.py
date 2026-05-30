@@ -65,18 +65,47 @@ def _config_path():
     return os.path.join(base, "config.json")
 
 
+# Tone rewrites the user can pick from the tray "Tone" submenu. They are
+# mutually exclusive with each other; "grammar" and "expand" are independent
+# options. Each tone maps to a one-line instruction injected into the AI prompt
+# (see prompt_builder + TONE_PROMPTS below).
+TONES = [
+    ("formal", "Formal", "Rewrite in a formal, professional tone."),
+    ("casual", "Casual", "Rewrite in a casual, friendly, conversational tone."),
+    ("professional", "Professional", "Rewrite in a polished, workplace-appropriate professional tone."),
+    ("friendly", "Friendly", "Rewrite in a warm, approachable, friendly tone."),
+    ("confident", "Confident", "Rewrite in a confident, assertive tone; prefer direct statements over hedging."),
+    ("concise", "Concise", "Make it as concise as possible; cut filler and redundancy while preserving the meaning."),
+    ("persuasive", "Persuasive", "Rewrite in a persuasive, compelling tone."),
+    ("empathetic", "Empathetic", "Rewrite in a kind, empathetic, understanding tone."),
+    ("academic", "Academic", "Rewrite in a precise, scholarly, academic tone."),
+    ("playful", "Playful", "Rewrite in a fun, playful, lighthearted tone."),
+]
+TONE_KEYS = [key for key, _label, _prompt in TONES]
+TONE_PROMPTS = {key: prompt for key, _label, prompt in TONES}
+
+
 DEFAULT_OPTIONS = {
     "grammar": True,
-    "formal": False,
-    "casual": False,
-    "concise": False,
+    **{key: False for key in TONE_KEYS},
     "expand": False,
     "auto_suggest": True,
 }
 
 
+# Correction engine. Verbic runs exclusively on the configured AI provider —
+# the offline LanguageTool engine has been removed. The single-entry ENGINES
+# map is kept so older configs that stored an engine value still load cleanly
+# (anything not "ai" is normalized to "ai" in load_config).
+ENGINES = {
+    "ai": {"label": "AI (Provider configured below)"},
+}
+DEFAULT_ENGINE = "ai"
+
+
 def _default_config():
     return {
+        "engine": DEFAULT_ENGINE,
         "provider": "ollama",
         "options": dict(DEFAULT_OPTIONS),
         "providers": {
@@ -106,6 +135,8 @@ def load_config():
             if k in merged_options and isinstance(v, bool):
                 merged_options[k] = v
         data["options"] = merged_options
+        if data.get("engine") not in ENGINES:
+            data["engine"] = DEFAULT_ENGINE
         return data
     except Exception:
         return defaults
