@@ -17,6 +17,8 @@ from config import load_config, save_config, PROVIDERS, DEFAULT_OPTIONS, ENGINES
 from welcome_window import WelcomeWindow
 from text_reader import read_focused_text
 from focus_watcher import FocusWatcher
+import updater
+from version import APP_VERSION
 from debug_log import log as _dlog
 
 
@@ -604,6 +606,10 @@ class GrammarTrayApp:
     def _is_paused(self, item):
         return self._paused_globally
 
+    def _check_updates(self, icon, item):
+        # Manual check from the tray: show result, proceed with install if newer.
+        updater.check_in_background(silent=False, notify=self._notify, ask=lambda v: True)
+
     def _open_about(self, icon, item):
         def _show():
             try:
@@ -614,7 +620,7 @@ class GrammarTrayApp:
                 pad = ttk.Frame(root, padding=20)
                 pad.pack(fill="both", expand=True)
                 tk.Label(pad, text="Verbic", font=("Segoe UI", 16, "bold")).pack(anchor="w")
-                tk.Label(pad, text="Version 1.0.0", font=("Segoe UI", 10), fg="#555").pack(anchor="w")
+                tk.Label(pad, text=f"Version {APP_VERSION}", font=("Segoe UI", 10), fg="#555").pack(anchor="w")
                 tk.Label(pad, text="© Sand Castle LLC", font=("Segoe UI", 9), fg="#777").pack(anchor="w", pady=(0, 10))
                 tk.Label(pad, text=(
                     "Hotkeys:\n"
@@ -725,6 +731,7 @@ class GrammarTrayApp:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(self._provider_label, None, enabled=False),
             pystray.MenuItem("Settings", self._open_settings, default=True),
+            pystray.MenuItem("Check for Updates", self._check_updates),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("About", self._open_about),
             pystray.MenuItem("Quit", self._quit),
@@ -736,4 +743,7 @@ class GrammarTrayApp:
         # Show first-run welcome dialog after a short delay so the tray icon
         # has a chance to appear behind it.
         threading.Timer(0.3, self._maybe_show_welcome).start()
+        # Silently check for updates a few seconds after launch; auto-installs if newer.
+        threading.Timer(4.0, lambda: updater.check_for_updates(
+            silent=True, notify=self._notify, ask=None)).start()
         self._icon.run()

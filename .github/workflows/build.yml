@@ -1,0 +1,70 @@
+name: Build Verbic (Windows)
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install openai anthropic keyboard pyperclip pynput pystray Pillow requests pywin32 win10toast uiautomation pyinstaller
+
+      - name: Build Verbic.exe (PyInstaller)
+        shell: pwsh
+        run: python build.py
+
+      - name: Compile installer (Inno Setup)
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          if (-not (Test-Path README.txt)) { Copy-Item README.md README.txt }
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+          $ver = "${{ github.ref_name }}".TrimStart('v')
+          Copy-Item installer_output\VerbicSetup.exe "installer_output\VerbicSetup-$ver.exe"
+          Get-ChildItem installer_output
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: verbic-windows
+          path: installer_output/*.exe
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Verbic ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: dist/**/*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
