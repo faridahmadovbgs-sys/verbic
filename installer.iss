@@ -1,10 +1,13 @@
-; Grammar Tool — Inno Setup script
-; Build:  iscc installer.iss   →   installer_output\GrammarToolSetup.exe
+; Verbic — Inno Setup script
+; Build:  iscc installer.iss   →   installer_output\VerbicSetup.exe
+;
+; Note: MyAppId GUID is intentionally stable across renames so users who
+; installed the previous "Grammar Tool" name upgrade cleanly to Verbic.
 
-#define MyAppName       "Grammar Tool"
-#define MyAppVersion    "1.0.0"
+#define MyAppName       "Verbic"
+#define MyAppVersion    "1.0.8"
 #define MyAppPublisher  "Sand Castle LLC"
-#define MyAppExeName    "GrammarTool.exe"
+#define MyAppExeName    "Verbic.exe"
 #define MyAppId         "{{2A8E1B4F-7B3C-4C26-9D1E-9F3F2C7B0A61}}"
 
 [Setup]
@@ -19,11 +22,11 @@ VersionInfoCompany={#MyAppPublisher}
 VersionInfoCopyright=Copyright (C) {#MyAppPublisher}
 VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion={#MyAppVersion}.0
-DefaultDirName={autopf}\GrammarTool
+DefaultDirName={autopf}\Verbic
 DefaultGroupName={#MyAppName}
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}
-OutputBaseFilename=GrammarToolSetup
+OutputBaseFilename=VerbicSetup
 OutputDir=installer_output
 Compression=lzma2
 SolidCompression=yes
@@ -32,6 +35,7 @@ SolidCompression=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 SetupIconFile=icon.ico
+LicenseFile=EULA.txt
 WizardStyle=modern
 DisableProgramGroupPage=yes
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -50,6 +54,7 @@ Name: "startupicon"; Description: "Start {#MyAppName} when Windows starts"; Grou
 [Files]
 Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "icon.png"; DestDir: "{app}"; Flags: ignoreversion
+Source: "EULA.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -68,7 +73,10 @@ function InitializeSetup(): Boolean;
 var
   ResultCode: Integer;
 begin
-  // If the app is already running, kill it so the installer can overwrite the exe.
+  // Kill the new and the legacy executable name so the installer can
+  // overwrite the old binary when upgrading from the previous "Grammar Tool"
+  // name to "Verbic".
   Exec('taskkill.exe', '/F /IM {#MyAppExeName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('taskkill.exe', '/F /IM GrammarTool.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Result := True;
 end;

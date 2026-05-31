@@ -1,15 +1,52 @@
 import ctypes
+import os
 import threading
+from ctypes import wintypes
 from pynput import keyboard, mouse
 from debug_log import log as _dlog
 
 
 _VK_CONTROL = 0x11
 _VK_SHIFT = 0x10
+_VK_SPACE = 0x20
+
+_OWN_PID = os.getpid()
+
+# Bind WindowFromPoint so we can identify the window under a mouse click.
+# Used by _on_click to skip buffer resets when the click landed on our own
+# overlay — otherwise the click that's meant to accept the suggestion would
+# also fire _on_typing and wipe the accept payload.
+_user32 = ctypes.windll.user32
+_user32.WindowFromPoint.argtypes = [wintypes.POINT]
+_user32.WindowFromPoint.restype = wintypes.HWND
+
+
+def _is_own_window(hwnd):
+    """True if hwnd belongs to this process (our overlay / settings / about /
+    welcome windows). The keystroke-time foreground poll must ignore these so
+    a brief overlay appearance doesn't trigger a buffer reset."""
+    if not hwnd:
+        return False
+    try:
+        pid = wintypes.DWORD()
+        ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        return pid.value == _OWN_PID
+    except Exception:
+        return False
+
+
+def _is_own_window_at_point(x, y):
+    """True if the topmost window at screen coords (x, y) is one of ours."""
+    try:
+        pt = wintypes.POINT(int(x), int(y))
+        return _is_own_window(_user32.WindowFromPoint(pt))
+    except Exception:
+        return False
 
 
 class KeyboardMonitor:
-    def __init__(self, on_hotkey, on_text_ready=None, on_accept_hotkey=None, on_typing=None):
+    def __init__(self, on_hotkey, on_text_ready=None, on_accept_hotkey=None,
+                 on_typing=None):
         self._buffer = []
         self._char_count = 0
         self._lock = threading.Lock()
@@ -32,9 +69,15 @@ class KeyboardMonitor:
             self._char_count += 1
 
     def add_newline(self):
+        # Enter ends a paragraph: in chat apps it sends the message, in
+        # editors it starts a new line. Either way the previous text is
+        # "committed" — drop it from the buffer so the next auto-suggest
+        # only considers what the user is typing *now*, not what came
+        # before the Enter.
         with self._lock:
-            self._buffer.append("\n")
-            self._char_count += 1
+            self._buffer.clear()
+            self._char_count = 0
+            self._cancel_text_timer()
 
     def handle_backspace(self):
         with self._lock:
@@ -63,6 +106,14 @@ class KeyboardMonitor:
             self._char_count = 0
             self._cancel_text_timer()
             return text, count
+
+    def snapshot_buffer(self):
+        """Atomically return (text, char_count). The auto-suggest pipeline
+        captures both at fire-time so the replacement length always matches
+        the text we sent to the LLM — even if the user manages to type
+        between the LLM completing and the overlay rendering."""
+        with self._lock:
+            return "".join(self._buffer), self._char_count
 
     def _cancel_text_timer(self):
         if self._text_timer is not None:
@@ -116,10 +167,16 @@ class KeyboardMonitor:
 
     def _check_foreground_change(self):
         """Reset the buffer if the foreground window changed since the last
-        keystroke — cursor position is no longer where we thought it was."""
+        keystroke — cursor position is no longer where we thought it was.
+
+        Own-process windows (overlay, settings, welcome, about) are ignored:
+        a brief overlay flash must not invalidate the buffer the user is
+        actively typing into."""
         try:
             hwnd = ctypes.windll.user32.GetForegroundWindow()
         except Exception:
+            return
+        if _is_own_window(hwnd):
             return
         if self._last_fg_hwnd is None:
             self._last_fg_hwnd = hwnd
@@ -178,13 +235,16 @@ class KeyboardMonitor:
                 self._on_hotkey()
                 return
 
-        # Ctrl+Tab (accept suggestion)
+        # Ctrl+Space (accept suggestion). Ctrl+Tab was the v1.0.x default but
+        # it clashed with tab cycling in browsers (Chrome/Edge/Firefox) and
+        # channel cycling in chat apps (Slack/Discord). Ctrl+Space is free in
+        # those and semantically matches "trigger suggestion" in IDEs.
         if self._ctrl_pressed and not self._shift_pressed and self._on_accept_hotkey:
-            if key == keyboard.Key.tab:
+            if key == keyboard.Key.space:
                 self._on_accept_hotkey()
                 return
             try:
-                if hasattr(key, "vk") and key.vk == 9:
+                if hasattr(key, "vk") and key.vk == _VK_SPACE:
                     self._on_accept_hotkey()
                     return
             except AttributeError:
@@ -204,7 +264,11 @@ class KeyboardMonitor:
             typed = True
         elif key == keyboard.Key.enter:
             self.add_newline()
-            typed = True
+            # Enter clears the buffer (previous paragraph is "done"). Don't
+            # schedule a suggestion off of an empty buffer — wait for the
+            # user to actually start typing the next sentence.
+            self._fire_on_typing()
+            return
         elif key == keyboard.Key.backspace:
             self.handle_backspace()
             typed = True
@@ -238,12 +302,24 @@ class KeyboardMonitor:
             pass
 
     def _on_click(self, x, y, button, pressed):
+        """Mouse press anywhere on screen.
+
+        Resets the keystroke buffer so the next round of typing starts fresh
+        at the (likely new) cursor position. Notably does NOT close any
+        visible suggestion overlay or clear the pending accept payload:
+        pynput's global mouse hook fires *before* tk's window-level click
+        handler, so racing here against a click meant for the overlay
+        reliably wiped the payload before the overlay could read it
+        (HighDPI made the coordinate-based 'is this click on us?' check
+        too flaky to rely on). The overlay still goes away when the user
+        types, which is the normal dismissal path; clicks elsewhere just
+        leave it floating until typing resumes.
+        """
         try:
             if self._paused:
                 return
             if pressed:
                 self.reset_buffer()
-                self._fire_on_typing()
         except Exception:
             pass
 

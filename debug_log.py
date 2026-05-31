@@ -8,7 +8,7 @@ from datetime import datetime
 
 
 _ENABLED = bool(os.environ.get("GRAMMAR_DEBUG"))
-_LOG_PATH = os.path.join(os.environ.get("TEMP") or os.getcwd(), "grammar_tool.log")
+_LOG_PATH = os.path.join(os.environ.get("TEMP") or os.getcwd(), "verbic.log")
 
 
 def is_enabled():

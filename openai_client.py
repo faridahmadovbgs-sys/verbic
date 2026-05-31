@@ -22,7 +22,9 @@ class OpenAICompatibleClient:
                 json={
                     "model": self.model,
                     "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.3,
+                    # Low temperature for editing tasks — consistent, minimal
+                    # rewrites rather than creative variation.
+                    "temperature": 0.2,
                 },
                 timeout=30,
             )

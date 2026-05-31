@@ -22,11 +22,12 @@ def build_exe():
         "--icon=icon.ico",
         "--version-file=version_info.txt",
         "--add-data", "icon.png;.",
-        "--name", "GrammarTool",
+        "--add-data", "EULA.txt;.",
+        "--name", "Verbic",
         "main.py",
     ]
     subprocess.run(cmd, check=True)
-    print("Build complete: dist/GrammarTool.exe")
+    print("Build complete: dist/Verbic.exe")
 
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))

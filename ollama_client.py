@@ -18,6 +18,12 @@ class OllamaClient:
                     # Keep the model resident in memory between requests so the
                     # next correction doesn't pay the cold-start cost.
                     "keep_alive": "30m",
+                    # Low temperature for editing tasks — we want consistent,
+                    # minimal rewrites, not creative reinterpretations.
+                    "options": {
+                        "temperature": 0.2,
+                        "top_p": 0.9,
+                    },
                 },
                 timeout=180,
             )

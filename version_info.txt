@@ -1,7 +1,7 @@
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 0, 0, 0),
-    prodvers=(1, 0, 0, 0),
+    filevers=(1, 0, 8, 0),
+    prodvers=(1, 0, 8, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -14,13 +14,13 @@ VSVersionInfo(
       StringTable(
         '040904B0',
         [StringStruct('CompanyName', 'Sand Castle LLC'),
-        StringStruct('FileDescription', 'Grammar Tool'),
-        StringStruct('FileVersion', '1.0.0'),
-        StringStruct('InternalName', 'GrammarTool'),
+        StringStruct('FileDescription', 'Verbic — AI Grammar Assistant'),
+        StringStruct('FileVersion', '1.0.8'),
+        StringStruct('InternalName', 'Verbic'),
         StringStruct('LegalCopyright', 'Copyright (C) Sand Castle LLC'),
-        StringStruct('OriginalFilename', 'GrammarTool.exe'),
-        StringStruct('ProductName', 'Grammar Tool'),
-        StringStruct('ProductVersion', '1.0.0')])
+        StringStruct('OriginalFilename', 'Verbic.exe'),
+        StringStruct('ProductName', 'Verbic'),
+        StringStruct('ProductVersion', '1.0.8')])
     ]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
   ]

@@ -21,6 +21,9 @@ class ClaudeClient:
                 json={
                     "model": self.model,
                     "max_tokens": 4096,
+                    # Low temperature for editing tasks — consistent, minimal
+                    # rewrites rather than creative variation.
+                    "temperature": 0.2,
                     "messages": [{"role": "user", "content": prompt}],
                 },
                 timeout=30,
