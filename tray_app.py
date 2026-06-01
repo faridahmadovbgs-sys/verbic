@@ -591,14 +591,20 @@ class GrammarTrayApp:
             time.sleep(0.05)
 
             old_clip = _get_clipboard_text()
-            sentinel = "\x00\x01verbic-no-selection\x01\x00"
+            # Sentinel must contain NO null character: CF_UNICODETEXT is
+            # null-terminated, so a leading \x00 truncates the stored string to
+            # "" and the marker comparison breaks. Use zero-width spaces around
+            # an unlikely token instead.
+            sentinel = "VERBIC-NO-SELECTION-SENTINEL-7f3a91"
             _set_clipboard_text(sentinel)
 
             kb.press(Key.ctrl)
             kb.press("c")
             kb.release("c")
             kb.release(Key.ctrl)
-            time.sleep(0.15)
+            # Give the focused app time to put the selection on the clipboard.
+            # Some apps (Office, Electron) are slow; 0.22s is comfortably safe.
+            time.sleep(0.22)
 
             new_clip = _get_clipboard_text()
 
@@ -888,18 +894,19 @@ class GrammarTrayApp:
         threading.Thread(target=self._maybe_show_toolbar, args=(x, y, kind), daemon=True).start()
 
     def _maybe_show_toolbar(self, x, y, kind):
-        has = self._focused_has_selection()
-        if has is True:
+        # A drag is a deliberate text-selection gesture, so always show the
+        # toolbar for it. (We used to gate this on a UIA selection check, but
+        # UIA reports an empty selection in many apps — browsers, Office,
+        # Electron — even when text IS selected, which wrongly hid the toolbar
+        # whenever you highlighted by dragging.)
+        if kind == "drag":
             self._show_selection_button(x, y)
-        elif has is False:
-            # UIA is sure there's no selection — definitely not a text select.
             return
-        else:
-            # UIA couldn't tell (app exposes no TextPattern). Trust an explicit
-            # drag gesture, but not an ambiguous double-click (which is what
-            # pops the toolbar on app icons).
-            if kind == "drag":
-                self._show_selection_button(x, y)
+        # A double/triple-click also fires on app icons, buttons, and list
+        # items, so for those only show the toolbar when UIA can positively
+        # confirm a real text selection.
+        if self._focused_has_selection() is True:
+            self._show_selection_button(x, y)
 
     def _focused_has_selection(self, timeout=0.6):
         """Return True/False if UI Automation can tell whether the focused
