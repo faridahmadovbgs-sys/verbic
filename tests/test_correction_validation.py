@@ -22,6 +22,10 @@ def _make_app(options=None, engine="ai", provider="ollama"):
     app._suggestion_window = None
     app._pending_corrected = None
     app._pending_char_count = 0
+    app._pending_is_insert = False
+    app._pending_paste_selection = False
+    app._selection_button = None
+    app._selection_button_timer = None
     return app
 
 
@@ -66,7 +70,9 @@ class TestOnAcceptHotkeyDualPurpose(unittest.TestCase):
             # char_count, not whatever the monitor reports now.
             Thread.assert_called_once()
             kwargs = Thread.call_args.kwargs
-            self.assertEqual(kwargs["args"], (16, "Corrected text."))
+            # args now carry the (char_count, text, is_insert, paste_selection)
+            # tuple — a replace, so both mode flags are False.
+            self.assertEqual(kwargs["args"], (16, "Corrected text.", False, False))
 
 
 class TestOnOverlayClickNeverFallsThrough(unittest.TestCase):
@@ -103,7 +109,7 @@ class TestOnOverlayClickNeverFallsThrough(unittest.TestCase):
             on_hotkey.assert_not_called()
             fake_overlay.close.assert_called_once()
             Thread.assert_called_once()
-            self.assertEqual(Thread.call_args.kwargs["args"], (6, "Hello."))
+            self.assertEqual(Thread.call_args.kwargs["args"], (6, "Hello.", False, False))
 
 
 class TestOnTypingInvalidatesPending(unittest.TestCase):

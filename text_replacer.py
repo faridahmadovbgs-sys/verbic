@@ -106,6 +106,12 @@ class TextReplacer:
         """Ctrl+A then paste — fully rewrite the focused field."""
         self._do_replace_all(corrected_text)
 
+    def insert_text(self, text):
+        """Paste `text` at the current caret without selecting anything first.
+        Used for inserting a generated answer where there's no original text
+        to replace."""
+        self._paste_with_clipboard(text, pre_delay=0.04)
+
     # === Internals ===
 
     def _do_replace(self, char_count, corrected_text):

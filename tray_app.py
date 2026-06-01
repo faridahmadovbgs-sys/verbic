@@ -12,8 +12,13 @@ from openai_client import OpenAICompatibleClient
 from claude_client import ClaudeClient
 from prompt_builder import PromptBuilder
 from suggestion_window import SuggestionWindow
+from selection_button import SelectionToolbar
 from settings_window import SettingsWindow
-from config import load_config, save_config, PROVIDERS, DEFAULT_OPTIONS, ENGINES, DEFAULT_ENGINE, TONES, TONE_KEYS
+from shortcuts_window import ShortcutsWindow
+from config import (
+    load_config, save_config, PROVIDERS, DEFAULT_OPTIONS, ENGINES,
+    DEFAULT_ENGINE, TONES, TONE_KEYS, TOOLBAR_ACTIONS,
+)
 from welcome_window import WelcomeWindow
 from text_reader import read_focused_text
 from focus_watcher import FocusWatcher
@@ -33,6 +38,21 @@ class GrammarTrayApp:
         self._suggestion_window = None
         self._pending_corrected = None
         self._pending_char_count = 0
+        # When True, accepting the current overlay inserts new text at the
+        # caret instead of replacing the last N typed characters (answer mode).
+        self._pending_is_insert = False
+        # When True, accepting pastes over the current selection (Fix action
+        # from the floating toolbar, where text is already selected).
+        self._pending_paste_selection = False
+        # Floating action toolbar shown after a selection.
+        self._selection_button = None
+        self._selection_button_timer = None
+        self._enable_selection_button = self._config.get("selection_button", True)
+        self._toolbar_config = dict(self._config.get("toolbar") or {})
+        # Speculation mode: cached eager answer pre-draft and the text it was
+        # drafted for, so a later "Draft answer" returns instantly.
+        self._speculative_answer = None
+        self._speculative_answer_for = None
         self._suggest_seq = 0
         self._suggest_lock = threading.Lock()
         # Rate-limit auto-suggest error notifications so a misconfigured
@@ -44,8 +64,13 @@ class GrammarTrayApp:
             on_text_ready=self._on_text_ready,
             on_accept_hotkey=self._on_accept_hotkey,
             on_typing=self._on_typing,
+            on_context_hotkey=self._on_context_hotkey,
+            on_answer_hotkey=self._on_answer_hotkey,
+            on_selection_made=self._on_selection_made,
         )
+        self.monitor.set_hotkeys(self._config.get("hotkeys") or {})
         self._focus_watcher = FocusWatcher(on_focus_change=self._on_foreground_changed)
+        self._writing_context = self._config.get("writing_context", "") or ""
         self._paused_globally = False
         # Tracks an open Settings window so a double-click on the tray icon
         # (which fires the default action twice) doesn't spawn two of them.
@@ -148,8 +173,10 @@ class GrammarTrayApp:
     def _on_text_ready(self):
         if self._paused_globally:
             return
-        if not self.options.get("auto_suggest"):
-            _dlog("tray", "text_ready: auto_suggest off")
+        # The typing-pause slot drives both auto-suggest grammar and
+        # speculation-mode prediction; proceed if either is enabled.
+        if not self.options.get("auto_suggest") and not self.options.get("speculation"):
+            _dlog("tray", "text_ready: auto_suggest + speculation off")
             return
 
         # Atomic snapshot — text and char_count must come from the same
@@ -191,6 +218,13 @@ class GrammarTrayApp:
                 _dlog("tray", f"suggest seq={seq}: superseded before correction")
                 return
 
+        # Speculation mode repurposes the typing-pause slot to predict how the
+        # user would continue, shown as an insert-at-caret suggestion. Grammar
+        # correction is still available via the Fix hotkey.
+        if self.options.get("speculation"):
+            self._speculate_continuation(text, seq)
+            return
+
         # Refuse to call the AI with no transformation requested — without
         # an instruction the model invents one, producing surreal rewrites.
         if not self._any_transformation_selected():
@@ -223,6 +257,27 @@ class GrammarTrayApp:
 
         _dlog("tray", f"suggest seq={seq}: showing overlay count={char_count}")
         self._show_suggestion(corrected, char_count)
+
+    def _speculate_continuation(self, text, seq):
+        """Predict the continuation of `text` and show it as an insert overlay."""
+        wctx = self._writing_context if self._writing_context else None
+        prompt = self.prompt_builder.build_predict(text, writing_context=wctx)
+        prediction = self.client.generate(prompt)
+        if not prediction or not prediction.strip():
+            return
+
+        with self._suggest_lock:
+            if seq != self._suggest_seq:
+                _dlog("tray", f"speculate seq={seq}: superseded after LLM")
+                return
+
+        cont = prediction.rstrip()
+        # The model is told to lead with a space when needed; make sure of it
+        # so the inserted continuation doesn't fuse onto the last word.
+        if cont and not text.endswith((" ", "\n")) and not cont.startswith((" ", "\n", ".", ",", "!", "?", ";", ":")):
+            cont = " " + cont
+        # Insert mode: append at the caret, nothing to replace.
+        self._show_suggestion(cont, 0, is_insert=True, header="Predictive (Flow)")
 
     def _any_transformation_selected(self):
         if self.options.get("grammar") or self.options.get("expand"):
@@ -278,7 +333,8 @@ class GrammarTrayApp:
     def _run_correction(self, text, context=None):
         """Run a correction request through the configured AI provider.
         Returns the corrected text, or None on failure."""
-        prompt = self.prompt_builder.build(text, self.options, context=context)
+        wctx = self._writing_context if self._writing_context else None
+        prompt = self.prompt_builder.build(text, self.options, context=context, writing_context=wctx)
         return self.client.generate(prompt)
 
     def _get_field_context(self, text):
@@ -302,7 +358,7 @@ class GrammarTrayApp:
             stripped = "…" + tail
         return stripped or None
 
-    def _show_suggestion(self, corrected, char_count):
+    def _show_suggestion(self, corrected, char_count, is_insert=False, paste_selection=False, header=None):
         existing = self._suggestion_window
         if existing is not None:
             try:
@@ -310,13 +366,21 @@ class GrammarTrayApp:
             except Exception:
                 pass
 
-        overlay = SuggestionWindow(suggestion_text=corrected, on_click=self._on_overlay_click)
+        overlay = SuggestionWindow(
+            suggestion_text=corrected,
+            on_click=self._on_overlay_click,
+            on_dismiss=self._on_overlay_dismiss,
+            on_copy=self._on_overlay_copy,
+            header_label=header or self._active_mode_label(),
+        )
         self._suggestion_window = overlay
         self._pending_corrected = corrected
         # char_count was captured at the same moment as the text we sent to
         # the LLM — using monitor.get_char_count() here would race with any
         # late typing and select the wrong number of characters.
         self._pending_char_count = char_count
+        self._pending_is_insert = is_insert
+        self._pending_paste_selection = paste_selection
 
         overlay.open()
 
@@ -324,6 +388,8 @@ class GrammarTrayApp:
             self._suggestion_window = None
             self._pending_corrected = None
             self._pending_char_count = 0
+            self._pending_is_insert = False
+            self._pending_paste_selection = False
 
     def _on_typing(self):
         with self._suggest_lock:
@@ -336,11 +402,15 @@ class GrammarTrayApp:
         # matches what's in the field. Clearing here closes that race.
         self._pending_corrected = None
         self._pending_char_count = 0
+        self._pending_is_insert = False
+        self._pending_paste_selection = False
         if overlay is not None:
             try:
                 overlay.close()
             except Exception:
                 pass
+        # Typing also dismisses the floating context button.
+        self._close_selection_button()
 
     def _on_foreground_changed(self, hwnd):
         # Win32 fired EVENT_SYSTEM_FOREGROUND. Push the new hwnd into the
@@ -355,11 +425,14 @@ class GrammarTrayApp:
         overlay = self._suggestion_window
         self._pending_corrected = None
         self._pending_char_count = 0
+        self._pending_is_insert = False
+        self._pending_paste_selection = False
         if overlay is not None:
             try:
                 overlay.close()
             except Exception:
                 pass
+        self._close_selection_button()
         with self._suggest_lock:
             self._suggest_seq += 1
 
@@ -376,7 +449,7 @@ class GrammarTrayApp:
             self._on_hotkey()
 
     def _on_overlay_click(self):
-        """Mouse-click handler on the SuggestionWindow.
+        """Apply-button handler on the SuggestionWindow.
 
         Pure 'accept what's shown'. If the payload was already invalidated
         (typing happened in the 50 ms close-poll window), do nothing — never
@@ -386,11 +459,53 @@ class GrammarTrayApp:
         """
         self._apply_pending_if_any()
 
+    def _on_overlay_dismiss(self):
+        """Dismiss-button (or ✕) handler — discard the suggestion without
+        applying. Clears the pending payload so a later Ctrl+Space doesn't
+        apply the just-dismissed text."""
+        self._suggestion_window = None
+        self._pending_corrected = None
+        self._pending_char_count = 0
+        self._pending_is_insert = False
+        self._pending_paste_selection = False
+
+    def _on_overlay_copy(self):
+        """Copy-button handler — put the suggestion on the clipboard instead of
+        applying it, then dismiss. Lets the user paste it wherever they like."""
+        text = self._pending_corrected
+        # Clear pending the same way Dismiss does — the overlay is going away.
+        self._on_overlay_dismiss()
+        if not text:
+            return
+        try:
+            from text_replacer import _set_clipboard_text
+            _set_clipboard_text(text)
+            self._notify("Verbic", "Copied to clipboard.")
+        except Exception:
+            pass
+
+    def _active_mode_label(self):
+        """Human-readable label for the overlay header describing what kind of
+        edit is being suggested (Grammar, a tone, Expand, or a combination)."""
+        parts = []
+        if self.options.get("grammar"):
+            parts.append("Grammar")
+        tone_names = {key: label for key, label, _prompt in TONES}
+        for key in TONE_KEYS:
+            if self.options.get(key):
+                parts.append(tone_names.get(key, key.title()))
+                break
+        if self.options.get("expand"):
+            parts.append("Expand")
+        return " · ".join(parts) if parts else "Suggested edit"
+
     def _apply_pending_if_any(self):
         """Return True if a pending suggestion was applied, False otherwise."""
         overlay = self._suggestion_window
         corrected = self._pending_corrected
         char_count = self._pending_char_count
+        is_insert = self._pending_is_insert
+        paste_selection = self._pending_paste_selection
         if overlay is None or not corrected:
             return False
 
@@ -401,20 +516,30 @@ class GrammarTrayApp:
         self._suggestion_window = None
         self._pending_corrected = None
         self._pending_char_count = 0
+        self._pending_is_insert = False
+        self._pending_paste_selection = False
 
         thread = threading.Thread(
             target=self._do_accept_replace,
-            args=(char_count, corrected),
+            args=(char_count, corrected, is_insert, paste_selection),
             daemon=True,
         )
         thread.start()
         return True
 
-    def _do_accept_replace(self, char_count, corrected):
+    def _do_accept_replace(self, char_count, corrected, is_insert=False, paste_selection=False):
         try:
             self.monitor.pause()
             try:
-                if char_count > 0:
+                if paste_selection:
+                    # Fix-from-toolbar: the original text is still selected in
+                    # the app, so paste straight over it.
+                    self.replacer.paste_over_selection(corrected)
+                elif is_insert:
+                    # Answer mode: nothing to replace, just drop the text in
+                    # at the caret.
+                    self.replacer.insert_text(corrected)
+                elif char_count > 0:
                     self.replacer.replace_text(char_count, corrected)
             finally:
                 self.monitor.resume()
@@ -437,24 +562,37 @@ class GrammarTrayApp:
     def _get_selected_text(self):
         """Copy whatever is selected in the focused field and return it.
 
-        Crucial: if the clipboard contents are unchanged after Ctrl+C, there
-        was no selection — do NOT pretend the existing clipboard counts as a
-        selection. Otherwise we'd pick up a previously-accepted correction
-        (which is exactly what was just put on the clipboard during paste)
-        and feed it back through the LLM as if the user had selected it —
-        the user sees their "previous fixed message" reappear out of nowhere.
+        Uses a sentinel to detect whether Ctrl+C actually copied something:
+        the clipboard is overwritten with a unique marker *before* Ctrl+C, so
+        a real copy leaves the selection on the clipboard while a no-op copy
+        (nothing selected) leaves the marker untouched. This is what lets the
+        user fix the *same* text repeatedly — the old "did the clipboard
+        change?" check failed there (the text was already on the clipboard
+        from the previous fix) and wrongly reported "no selection".
+
+        The user's original clipboard is restored afterward so we don't
+        clobber it.
         """
         import time
         try:
             from pynput.keyboard import Controller, Key
+            from text_replacer import _get_clipboard_text, _set_clipboard_text
             kb = Controller()
-            no_window = subprocess.CREATE_NO_WINDOW
 
-            old_clip = subprocess.run(
-                ["powershell", "-command", "Get-Clipboard"],
-                capture_output=True, text=True, timeout=2,
-                creationflags=no_window,
-            ).stdout.rstrip("\r\n")
+            # The trigger hotkey (e.g. Ctrl+Alt+X) leaves Alt/Shift physically
+            # held when we get here. If we synthesize Ctrl+C while Alt is still
+            # down the OS sees Ctrl+Alt+C, which doesn't copy. Release the
+            # modifiers first so the synthetic Ctrl+C is clean.
+            for mod in (Key.alt_l, Key.alt_r, Key.alt, Key.shift, Key.ctrl):
+                try:
+                    kb.release(mod)
+                except Exception:
+                    pass
+            time.sleep(0.05)
+
+            old_clip = _get_clipboard_text()
+            sentinel = "\x00\x01verbic-no-selection\x01\x00"
+            _set_clipboard_text(sentinel)
 
             kb.press(Key.ctrl)
             kb.press("c")
@@ -462,17 +600,18 @@ class GrammarTrayApp:
             kb.release(Key.ctrl)
             time.sleep(0.15)
 
-            result = subprocess.run(
-                ["powershell", "-command", "Get-Clipboard"],
-                capture_output=True, text=True, timeout=2,
-                creationflags=no_window,
-            )
-            new_clip = result.stdout.rstrip("\r\n")
+            new_clip = _get_clipboard_text()
 
-            # Only treat this as a selection if Ctrl+C actually wrote
-            # something new to the clipboard. An unchanged clipboard means
-            # the focused field had nothing selected.
-            if new_clip and new_clip != old_clip:
+            # Restore the user's original clipboard so a fix/answer doesn't
+            # leave the selection (or our sentinel) sitting on it.
+            try:
+                if old_clip is not None:
+                    _set_clipboard_text(old_clip)
+            except Exception:
+                pass
+
+            # A real selection replaced the sentinel; an empty field left it.
+            if new_clip and new_clip != sentinel:
                 return new_clip
             return None
         except Exception:
@@ -526,6 +665,31 @@ class GrammarTrayApp:
         except Exception:
             pass
 
+    def _apply_runtime_config(self, new_config, rebuild_client=False):
+        """Persist `new_config` and apply the parts that affect live behavior
+        (AI client, hotkeys, toolbar) without a restart."""
+        self._config = new_config
+        save_config(self._config)
+        if rebuild_client:
+            self._build_client()
+        self.monitor.set_hotkeys(self._config.get("hotkeys") or {})
+        self._toolbar_config = dict(self._config.get("toolbar") or {})
+        self._enable_selection_button = self._config.get("selection_button", True)
+        try:
+            if self._icon is not None:
+                self._icon.update_menu()
+                self._refresh_tooltip()
+        except Exception:
+            pass
+
+    def _open_shortcuts(self, icon=None, item=None):
+        def _run():
+            try:
+                ShortcutsWindow(self._config, lambda cfg: self._apply_runtime_config(cfg)).open()
+            except Exception:
+                pass
+        threading.Thread(target=_run, daemon=True).start()
+
     def _open_settings(self, icon, item):
         # Guard against pystray's default-action firing twice on a double-click.
         with self._settings_open_lock:
@@ -534,15 +698,7 @@ class GrammarTrayApp:
             self._settings_open = True
 
         def on_save(new_config):
-            self._config = new_config
-            save_config(self._config)
-            self._build_client()
-            try:
-                if self._icon is not None:
-                    self._icon.update_menu()
-                    self._refresh_tooltip()
-            except Exception:
-                pass
+            self._apply_runtime_config(new_config, rebuild_client=True)
 
         def build_test_client(engine, provider_key, provider_config):
             """Construct a one-shot client matching what the user has typed
@@ -620,12 +776,15 @@ class GrammarTrayApp:
                 pad = ttk.Frame(root, padding=20)
                 pad.pack(fill="both", expand=True)
                 tk.Label(pad, text="Verbic", font=("Segoe UI", 16, "bold")).pack(anchor="w")
+                tk.Label(pad, text="Write better. Everywhere.", font=("Segoe UI", 10, "italic"), fg="#6366F1").pack(anchor="w")
                 tk.Label(pad, text=f"Version {APP_VERSION}", font=("Segoe UI", 10), fg="#555").pack(anchor="w")
                 tk.Label(pad, text="© Sand Castle LLC", font=("Segoe UI", 9), fg="#777").pack(anchor="w", pady=(0, 10))
                 tk.Label(pad, text=(
                     "Hotkeys:\n"
                     "  Ctrl+Shift+G    Fix selected text or whole field\n"
-                    "  Ctrl+Space      Apply suggestion (or fix selection if no overlay)"
+                    "  Ctrl+Space      Apply suggestion (or fix selection if no overlay)\n"
+                    "  Ctrl+Alt+X      Set highlighted text as writing context\n"
+                    "  Ctrl+Alt+A      Draft an answer using the context"
                 ), justify="left", font=("Segoe UI", 9), fg="#333").pack(anchor="w", pady=(0, 10))
                 tk.Label(
                     pad,
@@ -647,6 +806,227 @@ class GrammarTrayApp:
                 pass
         threading.Thread(target=_show, daemon=True).start()
 
+    def _on_context_hotkey(self):
+        """Ctrl+Alt+X — capture current selection as writing context (runs in thread)."""
+        threading.Thread(target=self._capture_context_from_selection, daemon=True).start()
+
+    def _capture_context_from_selection(self):
+        selected = self._get_selected_text()
+        if not selected or not selected.strip():
+            self._notify("Verbic", "No text selected. Highlight text first.")
+            return
+        self._close_selection_button()
+        self._apply_context(selected)
+
+    def _clear_context(self, icon=None, item=None):
+        self._writing_context = ""
+        self._config["writing_context"] = ""
+        save_config(self._config)
+        try:
+            if self._icon is not None:
+                self._icon.update_menu()
+                self._refresh_tooltip()
+        except Exception:
+            pass
+        self._notify("Verbic", "Writing context cleared.")
+
+    def _set_clipboard_as_context(self, icon=None, item=None):
+        clip = self._get_clipboard_context()
+        if not clip or not clip.strip():
+            self._notify("Verbic", "Clipboard is empty. Copy some text first.")
+            return
+        self._apply_context(clip)
+
+    def _apply_context(self, text):
+        """Set `text` as the active writing context, persist, and notify."""
+        text = (text or "").strip()
+        if not text:
+            return
+        self._writing_context = text
+        self._config["writing_context"] = text
+        save_config(self._config)
+        try:
+            if self._icon is not None:
+                self._icon.update_menu()
+                self._refresh_tooltip()
+        except Exception:
+            pass
+        preview = text[:60] + "…" if len(text) > 60 else text
+        self._notify("Verbic", f"Context set: {preview}")
+
+        # Speculation mode: eagerly pre-draft the answer so pressing the answer
+        # hotkey later returns instantly.
+        self._speculative_answer = None
+        self._speculative_answer_for = None
+        if self.options.get("speculation"):
+            threading.Thread(target=self._predraft_answer, args=(text,), daemon=True).start()
+
+    def _predraft_answer(self, question):
+        try:
+            prompt = self.prompt_builder.build_answer(question, writing_context=question)
+            answer = self.client.generate(prompt)
+            if answer and answer.strip():
+                self._speculative_answer = answer.strip()
+                self._speculative_answer_for = question
+                _dlog("tray", "speculation: pre-drafted answer ready")
+        except Exception:
+            pass
+
+    def _on_selection_made(self, x, y):
+        """Mouse selection detected (drag or double/triple-click) — pop the
+        floating action toolbar near the release point (if enabled and an
+        overlay isn't already showing)."""
+        if self._paused_globally or not self._enable_selection_button:
+            return
+        if self._suggestion_window is not None:
+            return
+        self._show_selection_button(x, y)
+
+    def _selection_toolbar_buttons(self):
+        """Build the (label, callback) list for the floating toolbar from the
+        user's enabled toolbar actions. Each callback spawns a worker thread so
+        the Tk click handler returns immediately."""
+        labels = {key: label for key, label in TOOLBAR_ACTIONS}
+        # Surface the active tone on the Fix button so it's clear it reformats
+        # in the configured tone (e.g. "✓ Fix · Professional").
+        tone_names = {key: label for key, label, _prompt in TONES}
+        active_tone = next((tone_names[k] for k in TONE_KEYS if self.options.get(k)), None)
+        if active_tone:
+            labels["fix_grammar"] = f"✓ Fix · {active_tone}"
+        handlers = {
+            "set_context": self._capture_context_from_selection,
+            "draft_answer": self._draft_answer,
+            "fix_grammar": self._fix_selection,
+        }
+        buttons = []
+        for key, _label in TOOLBAR_ACTIONS:
+            if not self._toolbar_config.get(key, False):
+                continue
+            worker = handlers.get(key)
+            if worker is None:
+                continue
+            buttons.append((
+                labels[key],
+                lambda w=worker: threading.Thread(target=w, daemon=True).start(),
+            ))
+        return buttons
+
+    def _show_selection_button(self, x, y):
+        self._close_selection_button()
+
+        buttons = self._selection_toolbar_buttons()
+        if not buttons:
+            return
+
+        toolbar = SelectionToolbar(x, y, buttons)
+        self._selection_button = toolbar
+
+        # Auto-dismiss after 3.5s if the user ignores it.
+        def _auto_close():
+            if self._selection_button is toolbar:
+                self._close_selection_button()
+        self._selection_button_timer = threading.Timer(3.5, _auto_close)
+        self._selection_button_timer.daemon = True
+        self._selection_button_timer.start()
+
+        threading.Thread(target=toolbar.open, daemon=True).start()
+
+    def _close_selection_button(self):
+        timer = self._selection_button_timer
+        if timer is not None:
+            try:
+                timer.cancel()
+            except Exception:
+                pass
+            self._selection_button_timer = None
+        button = self._selection_button
+        self._selection_button = None
+        if button is not None:
+            try:
+                button.close()
+            except Exception:
+                pass
+
+    def _on_answer_hotkey(self):
+        """Ctrl+Alt+A — draft a full answer using the current context."""
+        threading.Thread(target=self._draft_answer, daemon=True).start()
+
+    def _draft_answer(self):
+        # The "question" to answer: prefer a live selection, then the pinned
+        # writing context, then whatever the user has typed so far.
+        question = self._get_selected_text()
+        if question and question.strip():
+            question = question.strip()
+        elif self._writing_context.strip():
+            question = self._writing_context.strip()
+        else:
+            buf, _count = self.monitor.snapshot_buffer()
+            question = (buf or "").strip()
+
+        if not question:
+            self._notify("Verbic", "Nothing to answer. Select a question or set context first.")
+            return
+
+        # Speculation mode may have pre-drafted this exact question already.
+        if self._speculative_answer and self._speculative_answer_for == question:
+            _dlog("tray", "speculation: using pre-drafted answer")
+            self._show_suggestion(self._speculative_answer, 0, is_insert=True, header="Draft answer")
+            return
+
+        prompt = self.prompt_builder.build_answer(question, writing_context=self._writing_context or None)
+        answer = self.client.generate(prompt)
+        if not answer or not answer.strip():
+            self._notify("Verbic", self._provider_failure_message())
+            return
+        # Insert mode: there's no typed text to replace, so char_count=0 and
+        # accepting pastes the answer at the caret.
+        self._show_suggestion(answer.strip(), 0, is_insert=True, header="Draft answer")
+
+    def _fix_selection(self):
+        """Toolbar 'Fix' action — correct the current selection and show the
+        result; accepting pastes it over the still-selected text."""
+        if not self._any_transformation_selected():
+            self._notify("Verbic", "Enable Grammar (or a tone) in the tray menu first.")
+            return
+        selected = self._get_selected_text()
+        if not selected or not selected.strip():
+            self._notify("Verbic", "No text selected to fix.")
+            return
+        corrected = self._run_correction(selected)
+        if corrected is None:
+            self._notify("Verbic", self._provider_failure_message())
+            return
+        if corrected.strip() == selected.strip():
+            self._notify("Verbic", "Text looks good — no changes needed.")
+            return
+        if not self._looks_like_valid_correction(selected, corrected):
+            self._notify("Verbic", "The model returned an unusable response.")
+            return
+        self._show_suggestion(corrected.strip(), 0, paste_selection=True)
+
+    def _context_menu_label(self, item):
+        if self._writing_context:
+            short = self._writing_context[:35]
+            if len(self._writing_context) > 35:
+                short += "…"
+            return f"Context: {short}"
+        return "Context: none"
+
+    def _toggle_selection_button(self, icon=None, item=None):
+        self._enable_selection_button = not self._enable_selection_button
+        self._config["selection_button"] = self._enable_selection_button
+        save_config(self._config)
+        if not self._enable_selection_button:
+            self._close_selection_button()
+        try:
+            if self._icon is not None:
+                self._icon.update_menu()
+        except Exception:
+            pass
+
+    def _is_selection_button_on(self, item):
+        return self._enable_selection_button
+
     def _quit(self, icon, item):
         self.monitor.stop()
         try:
@@ -664,10 +1044,17 @@ class GrammarTrayApp:
         provider = self._config.get("provider", "ollama")
         provider_label = PROVIDERS.get(provider, {}).get("label", provider)
         status = "Paused" if self._paused_globally else "Active"
+        ctx_line = ""
+        if self._writing_context:
+            short = self._writing_context[:40]
+            if len(self._writing_context) > 40:
+                short += "…"
+            ctx_line = f"\nContext: {short}"
         return (
             f"Verbic — {status}\n"
             f"Provider: {provider_label}\n"
-            "Ctrl+Shift+G fix · Ctrl+Space apply"
+            f"Ctrl+Shift+G fix · Ctrl+Space apply"
+            f"{ctx_line}"
         )
 
     def _open_eula(self, icon=None, item=None):
@@ -728,9 +1115,17 @@ class GrammarTrayApp:
             pystray.MenuItem("Tone", tone_submenu),
             pystray.MenuItem("Expand", self._toggle_option("expand"), checked=self._is_checked("expand")),
             pystray.MenuItem("Auto Suggest (typing)", self._toggle_option("auto_suggest"), checked=self._is_checked("auto_suggest")),
+            pystray.MenuItem("Predictive (Flow) Mode", self._toggle_option("speculation"), checked=self._is_checked("speculation")),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem(self._context_menu_label, None, enabled=False),
+            pystray.MenuItem("Set Clipboard as Context", self._set_clipboard_as_context),
+            pystray.MenuItem("Draft Answer from Context", lambda icon, item: self._on_answer_hotkey()),
+            pystray.MenuItem("Clear Context", self._clear_context, enabled=lambda item: bool(self._writing_context)),
+            pystray.MenuItem("Show button on selection", self._toggle_selection_button, checked=self._is_selection_button_on),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(self._provider_label, None, enabled=False),
             pystray.MenuItem("Settings", self._open_settings, default=True),
+            pystray.MenuItem("Shortcuts & Buttons", self._open_shortcuts),
             pystray.MenuItem("Check for Updates", self._check_updates),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("About", self._open_about),

@@ -233,9 +233,12 @@ class SuggestionWindow:
                     return True
         return False
 
-    def __init__(self, suggestion_text, on_click=None):
+    def __init__(self, suggestion_text, on_click=None, on_dismiss=None, on_copy=None, header_label=None):
         self._suggestion = suggestion_text
         self._on_click = on_click
+        self._on_dismiss = on_dismiss
+        self._on_copy = on_copy
+        self._header_label = header_label or "Suggested edit"
         self._window = None
         self._closed = False
         self._click_fired = False
@@ -267,6 +270,30 @@ class SuggestionWindow:
                 self._on_click()
             except Exception:
                 pass
+        return "break"
+
+    def _handle_dismiss(self, event=None):
+        if self._click_fired:
+            return "break"
+        self._click_fired = True
+        if self._on_dismiss:
+            try:
+                self._on_dismiss()
+            except Exception:
+                pass
+        self.close()
+        return "break"
+
+    def _handle_copy(self, event=None):
+        if self._click_fired:
+            return "break"
+        self._click_fired = True
+        if self._on_copy:
+            try:
+                self._on_copy()
+            except Exception:
+                pass
+        self.close()
         return "break"
 
     def _build_and_show(self):
@@ -306,18 +333,32 @@ class SuggestionWindow:
         accent = tk.Frame(body, bg=ACCENT, width=3)
         accent.pack(side="left", fill="y")
 
-        card = tk.Frame(body, bg=CARD_BG, cursor="hand2")
+        card = tk.Frame(body, bg=CARD_BG)
         card.pack(side="left", fill="both", expand=True, padx=0, pady=0)
 
+        # Header row: ✦ mode label on the left, a dismiss × on the right.
+        header_row = tk.Frame(card, bg=CARD_BG)
+        header_row.pack(fill="x", padx=12, pady=(8, 0))
+
         header = tk.Label(
-            card,
-            text="Suggested edit",
+            header_row,
+            text=f"✦  {self._header_label}",
             bg=CARD_BG,
             fg=ACCENT,
             font=("Segoe UI Semibold", 8),
+        )
+        header.pack(side="left")
+
+        close_btn = tk.Label(
+            header_row,
+            text="✕",
+            bg=CARD_BG,
+            fg=HINT_FG,
+            font=("Segoe UI", 9),
             cursor="hand2",
         )
-        header.pack(anchor="w", padx=12, pady=(8, 0))
+        close_btn.pack(side="right")
+        close_btn.bind("<Button-1>", self._handle_dismiss)
 
         text_label = tk.Label(
             card,
@@ -327,39 +368,62 @@ class SuggestionWindow:
             font=("Segoe UI", 10),
             wraplength=480,
             justify="left",
+        )
+        text_label.pack(anchor="w", padx=12, pady=(4, 8))
+
+        # Action row: a filled "Apply (Ctrl+Space)" button + a "Dismiss" link.
+        action_row = tk.Frame(card, bg=CARD_BG)
+        action_row.pack(anchor="w", fill="x", padx=12, pady=(0, 10))
+
+        apply_btn = tk.Label(
+            action_row,
+            text="Apply (Ctrl+Space)",
+            bg=ACCENT,
+            fg="#FFFFFF",
+            font=("Segoe UI Semibold", 9),
+            padx=12,
+            pady=4,
             cursor="hand2",
         )
-        text_label.pack(anchor="w", padx=12, pady=(2, 6))
+        apply_btn.pack(side="left")
+        apply_btn.bind("<Button-1>", self._handle_click)
 
-        # Hint row: a stylized Ctrl+Space "key cap" + action text + dismiss hint.
-        hint_row = tk.Frame(card, bg=CARD_BG)
-        hint_row.pack(anchor="w", fill="x", padx=10, pady=(0, 8))
+        def _apply_enter(_e):
+            apply_btn.configure(bg="#4F46E5")
 
-        kbd = tk.Label(
-            hint_row,
-            text=" Ctrl+Space ",
-            bg=KBD_BG,
-            fg=TEXT_FG,
-            font=("Segoe UI", 8),
-            bd=1,
-            relief="solid",
-            padx=2,
+        def _apply_leave(_e):
+            apply_btn.configure(bg=ACCENT)
+
+        apply_btn.bind("<Enter>", _apply_enter)
+        apply_btn.bind("<Leave>", _apply_leave)
+
+        copy_btn = tk.Label(
+            action_row,
+            text="Copy",
+            bg=CARD_BG,
+            fg=ACCENT,
+            font=("Segoe UI", 9),
+            padx=12,
+            pady=4,
             cursor="hand2",
         )
-        kbd.pack(side="left")
+        copy_btn.pack(side="left")
+        copy_btn.bind("<Button-1>", self._handle_copy)
+        copy_btn.bind("<Enter>", lambda _e: copy_btn.configure(fg="#4F46E5"))
+        copy_btn.bind("<Leave>", lambda _e: copy_btn.configure(fg=ACCENT))
 
-        hint_label = tk.Label(
-            hint_row,
-            text="  apply   ·   click to apply   ·   keep typing to dismiss",
+        dismiss_btn = tk.Label(
+            action_row,
+            text="Dismiss",
             bg=CARD_BG,
             fg=HINT_FG,
-            font=("Segoe UI", 8),
+            font=("Segoe UI", 9),
+            padx=12,
+            pady=4,
             cursor="hand2",
         )
-        hint_label.pack(side="left")
-
-        for w in (self._window, border, body, card, header, text_label, hint_row, kbd, hint_label):
-            w.bind("<Button-1>", self._handle_click)
+        dismiss_btn.pack(side="left")
+        dismiss_btn.bind("<Button-1>", self._handle_dismiss)
 
         self._window.update_idletasks()
         self._position()

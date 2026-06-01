@@ -122,9 +122,9 @@ class SettingsWindow:
         )
 
         # ----- Hotkey row -----
-        hotkey_label = ttk.Label(frame, text="Hotkey:")
+        hotkey_label = ttk.Label(frame, text="Hotkeys:")
         hotkey_value = ttk.Label(
-            frame, text="Ctrl+Shift+G  ·  Ctrl+Space to apply suggestion",
+            frame, text="Customize in tray → “Shortcuts & Buttons”",
             foreground="gray",
         )
 

@@ -1,6 +1,7 @@
 import ctypes
 import os
 import threading
+import time
 from ctypes import wintypes
 from pynput import keyboard, mouse
 from debug_log import log as _dlog
@@ -8,9 +9,27 @@ from debug_log import log as _dlog
 
 _VK_CONTROL = 0x11
 _VK_SHIFT = 0x10
+_VK_ALT = 0x12
 _VK_SPACE = 0x20
 
+# Virtual-key codes that are modifiers — never treated as a hotkey's "main" key.
+_MODIFIER_VKS = {0x10, 0x11, 0x12, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x5B, 0x5C}
+
 _OWN_PID = os.getpid()
+
+
+def _key_vk(key):
+    """Best-effort Windows virtual-key code for a pynput key.
+
+    KeyCode objects expose .vk directly. Special keys (space, enter, function
+    keys) wrap a KeyCode in .value. Returns None when no vk is available."""
+    vk = getattr(key, "vk", None)
+    if vk is not None:
+        return vk
+    try:
+        return key.value.vk
+    except Exception:
+        return None
 
 # Bind WindowFromPoint so we can identify the window under a mouse click.
 # Used by _on_click to skip buffer resets when the click landed on our own
@@ -46,7 +65,8 @@ def _is_own_window_at_point(x, y):
 
 class KeyboardMonitor:
     def __init__(self, on_hotkey, on_text_ready=None, on_accept_hotkey=None,
-                 on_typing=None):
+                 on_typing=None, on_context_hotkey=None, on_answer_hotkey=None,
+                 on_selection_made=None):
         self._buffer = []
         self._char_count = 0
         self._lock = threading.Lock()
@@ -54,6 +74,18 @@ class KeyboardMonitor:
         self._on_text_ready = on_text_ready
         self._on_accept_hotkey = on_accept_hotkey
         self._on_typing = on_typing
+        self._on_context_hotkey = on_context_hotkey
+        self._on_answer_hotkey = on_answer_hotkey
+        self._on_selection_made = on_selection_made
+        # Maps an action name to its callback. Hotkey definitions are matched
+        # against these at keypress time (see set_hotkeys / _match_hotkey).
+        self._action_callbacks = {
+            "fix": on_hotkey,
+            "accept": on_accept_hotkey,
+            "context": on_context_hotkey,
+            "answer": on_answer_hotkey,
+        }
+        self._hotkeys = {}
         self._listener = None
         self._ctrl_pressed = False
         self._shift_pressed = False
@@ -62,6 +94,18 @@ class KeyboardMonitor:
         self._paused = False
         self._text_timer = None
         self._last_fg_hwnd = None
+        # Drag-to-select tracking for the floating context button.
+        self._press_pos = None
+        # Double/triple-click tracking: word- and line-selection produce no
+        # drag, so we detect them by two rapid clicks at the same spot.
+        self._last_release_time = 0.0
+        self._last_release_pos = None
+
+    def set_hotkeys(self, hotkeys):
+        """Install the action→binding map. `hotkeys` is the dict from config:
+        {action: {ctrl, shift, alt, vk, label}}. Safe to call at runtime to
+        apply a rebind without restarting the listener."""
+        self._hotkeys = dict(hotkeys or {})
 
     def add_char(self, char):
         with self._lock:
@@ -208,44 +252,39 @@ class KeyboardMonitor:
         elif key in (keyboard.Key.shift, keyboard.Key.shift_l, keyboard.Key.shift_r):
             self._shift_pressed = True
 
-        # Ctrl+` (backtick/tilde)
+        # Configurable hotkeys: match the pressed key's vk + the live modifier
+        # state against each action's binding. Modifiers are read from the OS
+        # (GetAsyncKeyState) rather than tracked state so a missed release event
+        # during a window switch can't desync the match.
+        vk = _key_vk(key)
+        if vk is not None and vk not in _MODIFIER_VKS and self._hotkeys:
+            try:
+                gks = ctypes.windll.user32.GetAsyncKeyState
+                ctrl = bool(gks(_VK_CONTROL) & 0x8000)
+                shift = bool(gks(_VK_SHIFT) & 0x8000)
+                alt = bool(gks(_VK_ALT) & 0x8000)
+            except Exception:
+                ctrl, shift, alt = self._ctrl_pressed, self._shift_pressed, False
+            for action, binding in self._hotkeys.items():
+                cb = self._action_callbacks.get(action)
+                if cb is None:
+                    continue
+                if (vk == binding.get("vk")
+                        and bool(binding.get("ctrl")) == ctrl
+                        and bool(binding.get("shift")) == shift
+                        and bool(binding.get("alt")) == alt):
+                    cb()
+                    return
+
+        # Ctrl+` (backtick/tilde) — fixed convenience alias for Fix, kept for
+        # muscle memory regardless of the configurable Fix binding.
         if self._ctrl_pressed:
             try:
                 if hasattr(key, "char") and key.char == "`":
                     self._on_hotkey()
                     return
-                if hasattr(key, "vk") and key.vk == 192:
+                if vk == 192:
                     self._on_hotkey()
-                    return
-            except AttributeError:
-                pass
-
-        # Ctrl+Shift+G
-        if self._ctrl_pressed and self._shift_pressed:
-            try:
-                if hasattr(key, "char") and key.char == "\x07":
-                    self._on_hotkey()
-                    return
-                if hasattr(key, "vk") and key.vk == 71:
-                    self._on_hotkey()
-                    return
-            except AttributeError:
-                pass
-            if key == keyboard.KeyCode.from_char("g") or key == keyboard.KeyCode.from_char("G"):
-                self._on_hotkey()
-                return
-
-        # Ctrl+Space (accept suggestion). Ctrl+Tab was the v1.0.x default but
-        # it clashed with tab cycling in browsers (Chrome/Edge/Firefox) and
-        # channel cycling in chat apps (Slack/Discord). Ctrl+Space is free in
-        # those and semantically matches "trigger suggestion" in IDEs.
-        if self._ctrl_pressed and not self._shift_pressed and self._on_accept_hotkey:
-            if key == keyboard.Key.space:
-                self._on_accept_hotkey()
-                return
-            try:
-                if hasattr(key, "vk") and key.vk == _VK_SPACE:
-                    self._on_accept_hotkey()
                     return
             except AttributeError:
                 pass
@@ -302,24 +341,68 @@ class KeyboardMonitor:
             pass
 
     def _on_click(self, x, y, button, pressed):
-        """Mouse press anywhere on screen.
+        """Mouse press/release anywhere on screen.
 
-        Resets the keystroke buffer so the next round of typing starts fresh
-        at the (likely new) cursor position. Notably does NOT close any
-        visible suggestion overlay or clear the pending accept payload:
-        pynput's global mouse hook fires *before* tk's window-level click
-        handler, so racing here against a click meant for the overlay
+        On press: resets the keystroke buffer so the next round of typing
+        starts fresh at the (likely new) cursor position. Notably does NOT
+        close any visible suggestion overlay or clear the pending accept
+        payload: pynput's global mouse hook fires *before* tk's window-level
+        click handler, so racing here against a click meant for the overlay
         reliably wiped the payload before the overlay could read it
         (HighDPI made the coordinate-based 'is this click on us?' check
         too flaky to rely on). The overlay still goes away when the user
         types, which is the normal dismissal path; clicks elsewhere just
         leave it floating until typing resumes.
+
+        On release: if the pointer moved far enough since press, the user
+        just drag-selected text — fire on_selection_made so the host can pop
+        the floating 'Set as context' button near the release point.
         """
         try:
             if self._paused:
                 return
+            # Ignore clicks that land on one of our own windows (the floating
+            # button or the suggestion overlay) so clicking the button doesn't
+            # wipe the buffer or re-trigger selection handling. The bounds
+            # fallback covers HighDPI displays where WindowFromPoint and
+            # pynput's click coordinates disagree.
+            if _is_own_window_at_point(x, y):
+                return
+            try:
+                from selection_button import SelectionToolbar
+                if SelectionToolbar.point_is_inside_any_visible(x, y):
+                    return
+            except Exception:
+                pass
             if pressed:
+                self._press_pos = (x, y)
                 self.reset_buffer()
+            else:
+                press = self._press_pos
+                self._press_pos = None
+                if press is not None and self._on_selection_made is not None:
+                    dx = abs(x - press[0])
+                    dy = abs(y - press[1])
+                    now = time.monotonic()
+                    # Case 1: drag-select — pointer moved between press and
+                    # release. 6px threshold filters clicks and tiny jitter.
+                    dragged = (dx + dy) >= 6
+                    # Case 2: double/triple-click select (word / line) — no
+                    # drag, but a second click lands at ~the same spot within
+                    # 450ms of the previous one.
+                    multi_click = False
+                    if not dragged and self._last_release_pos is not None:
+                        ldx = abs(x - self._last_release_pos[0])
+                        ldy = abs(y - self._last_release_pos[1])
+                        if (now - self._last_release_time) <= 0.45 and (ldx + ldy) <= 8:
+                            multi_click = True
+                    self._last_release_time = now
+                    self._last_release_pos = (x, y)
+                    if dragged or multi_click:
+                        try:
+                            self._on_selection_made(x, y)
+                        except Exception:
+                            pass
         except Exception:
             pass
 

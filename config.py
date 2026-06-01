@@ -90,7 +90,45 @@ DEFAULT_OPTIONS = {
     **{key: False for key in TONE_KEYS},
     "expand": False,
     "auto_suggest": True,
+    # Speculation mode: predict sentence continuations on a typing pause and
+    # eagerly pre-draft answers as soon as context is set.
+    "speculation": False,
 }
+
+
+# === Configurable hotkeys ===
+# Each action maps to a binding: required modifiers + the main key's Windows
+# virtual-key code, plus a human-readable label for the UI. Users rebind these
+# in the Shortcuts window (settings_window). The keyboard monitor matches live
+# keystrokes against these definitions instead of hardcoded combos.
+HOTKEY_ACTIONS = [
+    ("fix", "Fix grammar / whole field"),
+    ("accept", "Apply suggestion"),
+    ("context", "Set selection as context"),
+    ("answer", "Draft answer from context"),
+]
+
+DEFAULT_HOTKEYS = {
+    "fix":     {"ctrl": True, "shift": True,  "alt": False, "vk": 71, "label": "Ctrl+Shift+G"},
+    "accept":  {"ctrl": True, "shift": False, "alt": False, "vk": 32, "label": "Ctrl+Space"},
+    "context": {"ctrl": True, "shift": False, "alt": True,  "vk": 88, "label": "Ctrl+Alt+X"},
+    "answer":  {"ctrl": True, "shift": False, "alt": True,  "vk": 65, "label": "Ctrl+Alt+A"},
+}
+
+
+# === Floating selection toolbar ===
+# Buttons shown next to a drag-selection. Each action maps to enabled/disabled.
+# The label carries a small glyph + word; order here is the on-screen order.
+TOOLBAR_ACTIONS = [
+    ("set_context", "✎ Context"),
+    ("draft_answer", "✦ Answer"),
+    ("fix_grammar", "✓ Fix"),
+]
+DEFAULT_TOOLBAR = {"set_context": True, "draft_answer": True, "fix_grammar": True}
+
+
+def _hotkeys_copy():
+    return {k: dict(v) for k, v in DEFAULT_HOTKEYS.items()}
 
 
 # Correction engine. Verbic runs exclusively on the configured AI provider —
@@ -108,6 +146,9 @@ def _default_config():
         "engine": DEFAULT_ENGINE,
         "provider": "ollama",
         "options": dict(DEFAULT_OPTIONS),
+        "hotkeys": _hotkeys_copy(),
+        "toolbar": dict(DEFAULT_TOOLBAR),
+        "selection_button": True,
         "providers": {
             name: {"model": info["default_model"], "api_key": "", "base_url": info["base_url"] or ""}
             for name, info in PROVIDERS.items()
@@ -137,6 +178,32 @@ def load_config():
         data["options"] = merged_options
         if data.get("engine") not in ENGINES:
             data["engine"] = DEFAULT_ENGINE
+
+        # Backfill hotkeys: start from defaults, overlay any saved binding that
+        # still names a known action and carries a valid shape.
+        saved_hotkeys = data.get("hotkeys") or {}
+        merged_hotkeys = _hotkeys_copy()
+        for action, binding in saved_hotkeys.items():
+            if action in merged_hotkeys and isinstance(binding, dict) and "vk" in binding:
+                merged_hotkeys[action] = {
+                    "ctrl": bool(binding.get("ctrl")),
+                    "shift": bool(binding.get("shift")),
+                    "alt": bool(binding.get("alt")),
+                    "vk": int(binding.get("vk")),
+                    "label": str(binding.get("label", "")),
+                }
+        data["hotkeys"] = merged_hotkeys
+
+        # Backfill toolbar toggles.
+        saved_toolbar = data.get("toolbar") or {}
+        merged_toolbar = dict(DEFAULT_TOOLBAR)
+        for k, v in saved_toolbar.items():
+            if k in merged_toolbar and isinstance(v, bool):
+                merged_toolbar[k] = v
+        data["toolbar"] = merged_toolbar
+        if "selection_button" not in data or not isinstance(data["selection_button"], bool):
+            data["selection_button"] = True
+
         return data
     except Exception:
         return defaults
