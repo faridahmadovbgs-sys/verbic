@@ -143,8 +143,21 @@ class SelectionToolbar:
             btn.bind("<Leave>", _leave)
             clickables.append(btn)
 
-        # Clicking the chrome (not a button) should just dismiss.
-        for w in (self._window, border, bar):
+        # Trailing ✕ to dismiss the toolbar without picking an action.
+        if self._buttons:
+            sep = tk.Frame(bar, bg=BORDER, width=1)
+            sep.pack(side="left", fill="y", pady=3)
+            close_btn = tk.Label(
+                bar, text="✕", bg=BTN_BG, fg="#C7D2FE",
+                font=("Segoe UI", 9), cursor="hand2", padx=9, pady=5,
+            )
+            close_btn.pack(side="left")
+            close_btn.bind("<Button-1>", lambda _e: self.close())
+            close_btn.bind("<Enter>", lambda _e: close_btn.configure(bg=HOVER_BG, fg="#FFFFFF"))
+            close_btn.bind("<Leave>", lambda _e: close_btn.configure(bg=BTN_BG, fg="#C7D2FE"))
+
+        # Clicking the chrome (the 1px border/background, not a button) dismisses.
+        for w in (border, bar):
             w.bind("<Button-1>", lambda _e: self.close())
 
         self._window.update_idletasks()

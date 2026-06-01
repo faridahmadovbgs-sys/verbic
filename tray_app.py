@@ -986,11 +986,12 @@ class GrammarTrayApp:
         toolbar = SelectionToolbar(x, y, buttons)
         self._selection_button = toolbar
 
-        # Auto-dismiss after 3.5s if the user ignores it.
+        # Auto-dismiss after 8s if the user ignores it (was 3.5s, which felt
+        # like it vanished too fast). The user can also dismiss it with the ✕.
         def _auto_close():
             if self._selection_button is toolbar:
                 self._close_selection_button()
-        self._selection_button_timer = threading.Timer(3.5, _auto_close)
+        self._selection_button_timer = threading.Timer(8.0, _auto_close)
         self._selection_button_timer.daemon = True
         self._selection_button_timer.start()
 

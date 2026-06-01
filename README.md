@@ -7,7 +7,7 @@ whole replies from context you give it, and can even predict how you'd finish a
 sentence. Everything surfaces as a suggestion you explicitly accept — Verbic
 never silently rewrites your words.
 
-Published by **Sand Castle LLC**. Current version: **1.1.2**.
+Published by **Sand Castle LLC**. Current version: **1.1.3**.
 
 > ### 🔑 You need an AI provider before Verbic can do anything
 > Verbic doesn't ship with its own AI — it connects to one you choose. Pick one:
@@ -206,9 +206,9 @@ which appear in tray → Shortcuts & Buttons:
   whatever tone is set, e.g. *Professional*); accepting pastes it over the
   selection. The button shows the active tone, e.g. **✓ Fix · Professional**.
 
-The bar never steals focus (so your selection stays intact), auto-dismisses
-after a few seconds, and disappears when you start typing. Turn the whole thing
-off with **Show button on selection** in the tray.
+The bar never steals focus (so your selection stays intact), has a **✕** to
+dismiss it, auto-dismisses after ~8 seconds, and disappears when you start
+typing. Turn the whole thing off with **Show button on selection** in the tray.
 
 ### Predictive (Flow) Mode
 
