@@ -816,8 +816,11 @@ class GrammarTrayApp:
         """Ctrl+Alt+X — capture current selection as writing context (runs in thread)."""
         threading.Thread(target=self._capture_context_from_selection, daemon=True).start()
 
-    def _capture_context_from_selection(self):
-        selected = self._get_selected_text()
+    def _capture_context_from_selection(self, selected=None):
+        # `selected` is pre-captured by the toolbar; the Ctrl+Alt+X hotkey path
+        # passes None and captures live.
+        if not selected or not selected.strip():
+            selected = self._get_selected_text()
         if not selected or not selected.strip():
             self._notify("Verbic", "No text selected. Highlight text first.")
             return
@@ -894,19 +897,23 @@ class GrammarTrayApp:
         threading.Thread(target=self._maybe_show_toolbar, args=(x, y, kind), daemon=True).start()
 
     def _maybe_show_toolbar(self, x, y, kind):
-        # A drag is a deliberate text-selection gesture, so always show the
-        # toolbar for it. (We used to gate this on a UIA selection check, but
-        # UIA reports an empty selection in many apps — browsers, Office,
-        # Electron — even when text IS selected, which wrongly hid the toolbar
-        # whenever you highlighted by dragging.)
-        if kind == "drag":
-            self._show_selection_button(x, y)
+        # Capture the selected text NOW — right after the gesture, while the
+        # source app still has focus and the selection is live. Capturing later
+        # (when a toolbar button is clicked) raced with the toolbar window /
+        # focus and frequently came back empty, so Answer/Fix did nothing.
+        # The captured text is also what decides whether to show the toolbar:
+        # no text selected → nothing to act on → don't show.
+        if kind == "click":
+            # A double/triple-click also lands on icons / buttons / list items.
+            # Only probe (synth Ctrl+C) when UIA suggests a real text selection,
+            # so we don't copy on every click.
+            if self._focused_has_selection() is not True:
+                return
+        selection = self._get_selected_text()
+        if not selection or not selection.strip():
+            _dlog("tray", f"toolbar: no selection captured ({kind})")
             return
-        # A double/triple-click also fires on app icons, buttons, and list
-        # items, so for those only show the toolbar when UIA can positively
-        # confirm a real text selection.
-        if self._focused_has_selection() is True:
-            self._show_selection_button(x, y)
+        self._show_selection_button(x, y, selection.strip())
 
     def _focused_has_selection(self, timeout=0.6):
         """Return True/False if UI Automation can tell whether the focused
@@ -954,9 +961,10 @@ class GrammarTrayApp:
         t.join(timeout)
         return result["val"]
 
-    def _selection_toolbar_buttons(self):
-        """Build the (label, callback) list for the floating toolbar from the
-        user's enabled toolbar actions. Each callback spawns a worker thread so
+    def _selection_toolbar_buttons(self, selection):
+        """Build the (label, callback) list for the floating toolbar. Each
+        action uses the text captured when the toolbar was shown (`selection`)
+        so it doesn't re-copy at click time. Callbacks spawn a worker thread so
         the Tk click handler returns immediately."""
         labels = {key: label for key, label in TOOLBAR_ACTIONS}
         # Surface the active tone on the Fix button so it's clear it reformats
@@ -966,9 +974,9 @@ class GrammarTrayApp:
         if active_tone:
             labels["fix_grammar"] = f"✓ Fix · {active_tone}"
         handlers = {
-            "set_context": self._capture_context_from_selection,
-            "draft_answer": self._draft_answer,
-            "fix_grammar": self._fix_selection,
+            "set_context": lambda: self._capture_context_from_selection(selection),
+            "draft_answer": lambda: self._draft_answer(selection),
+            "fix_grammar": lambda: self._fix_selection(selection),
         }
         buttons = []
         for key, _label in TOOLBAR_ACTIONS:
@@ -983,10 +991,10 @@ class GrammarTrayApp:
             ))
         return buttons
 
-    def _show_selection_button(self, x, y):
+    def _show_selection_button(self, x, y, selection):
         self._close_selection_button()
 
-        buttons = self._selection_toolbar_buttons()
+        buttons = self._selection_toolbar_buttons(selection)
         if not buttons:
             return
 
@@ -1024,21 +1032,26 @@ class GrammarTrayApp:
         """Ctrl+Alt+A — draft a full answer using the current context."""
         threading.Thread(target=self._draft_answer, daemon=True).start()
 
-    def _draft_answer(self):
-        # The "question" to answer: prefer a live selection, then the pinned
-        # writing context, then whatever the user has typed so far.
-        question = self._get_selected_text()
-        if question and question.strip():
-            question = question.strip()
-        elif self._writing_context.strip():
-            question = self._writing_context.strip()
+    def _draft_answer(self, selection=None):
+        # The "question" to answer: the toolbar passes a pre-captured selection;
+        # otherwise prefer a live selection, then the pinned writing context,
+        # then whatever the user has typed so far.
+        if selection and selection.strip():
+            question = selection.strip()
         else:
-            buf, _count = self.monitor.snapshot_buffer()
-            question = (buf or "").strip()
+            question = self._get_selected_text()
+            if question and question.strip():
+                question = question.strip()
+            elif self._writing_context.strip():
+                question = self._writing_context.strip()
+            else:
+                buf, _count = self.monitor.snapshot_buffer()
+                question = (buf or "").strip()
 
         if not question:
             self._notify("Verbic", "Nothing to answer. Select a question or set context first.")
             return
+        _dlog("tray", f"draft_answer: question len={len(question)}")
 
         # Speculation mode may have pre-drafted this exact question already.
         if self._speculative_answer and self._speculative_answer_for == question:
@@ -1055,13 +1068,14 @@ class GrammarTrayApp:
         # accepting pastes the answer at the caret.
         self._show_suggestion(answer.strip(), 0, is_insert=True, header="Draft answer")
 
-    def _fix_selection(self):
-        """Toolbar 'Fix' action — correct the current selection and show the
-        result; accepting pastes it over the still-selected text."""
+    def _fix_selection(self, selection=None):
+        """Toolbar 'Fix' action — correct the selection and show the result;
+        accepting pastes it over the still-selected text. `selection` is
+        pre-captured by the toolbar; None means capture live."""
         if not self._any_transformation_selected():
             self._notify("Verbic", "Enable Grammar (or a tone) in the tray menu first.")
             return
-        selected = self._get_selected_text()
+        selected = selection if (selection and selection.strip()) else self._get_selected_text()
         if not selected or not selected.strip():
             self._notify("Verbic", "No text selected to fix.")
             return
