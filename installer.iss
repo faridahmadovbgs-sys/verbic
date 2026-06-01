@@ -5,7 +5,7 @@
 ; installed the previous "Grammar Tool" name upgrade cleanly to Verbic.
 
 #define MyAppName       "Verbic"
-#define MyAppVersion    "1.1.0"
+#define MyAppVersion    "1.1.1"
 #define MyAppPublisher  "Sand Castle LLC"
 #define MyAppExeName    "Verbic.exe"
 #define MyAppId         "{{2A8E1B4F-7B3C-4C26-9D1E-9F3F2C7B0A61}}"

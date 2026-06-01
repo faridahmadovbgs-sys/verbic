@@ -872,15 +872,80 @@ class GrammarTrayApp:
         except Exception:
             pass
 
-    def _on_selection_made(self, x, y):
-        """Mouse selection detected (drag or double/triple-click) — pop the
-        floating action toolbar near the release point (if enabled and an
-        overlay isn't already showing)."""
+    def _on_selection_made(self, x, y, kind="drag"):
+        """Mouse selection detected — pop the floating action toolbar near the
+        release point, but only if there's actually a text selection.
+
+        `kind` is "drag" (a reliable text gesture) or "click" (double/triple-
+        click, which also fires on app icons, buttons, and list items). To
+        avoid the toolbar appearing on every double-click, we verify a real
+        text selection via UI Automation before showing it. The check runs in
+        a worker thread so the mouse listener never blocks."""
         if self._paused_globally or not self._enable_selection_button:
             return
         if self._suggestion_window is not None:
             return
-        self._show_selection_button(x, y)
+        threading.Thread(target=self._maybe_show_toolbar, args=(x, y, kind), daemon=True).start()
+
+    def _maybe_show_toolbar(self, x, y, kind):
+        has = self._focused_has_selection()
+        if has is True:
+            self._show_selection_button(x, y)
+        elif has is False:
+            # UIA is sure there's no selection — definitely not a text select.
+            return
+        else:
+            # UIA couldn't tell (app exposes no TextPattern). Trust an explicit
+            # drag gesture, but not an ambiguous double-click (which is what
+            # pops the toolbar on app icons).
+            if kind == "drag":
+                self._show_selection_button(x, y)
+
+    def _focused_has_selection(self, timeout=0.6):
+        """Return True/False if UI Automation can tell whether the focused
+        control has a non-empty text selection, or None if it can't (no
+        TextPattern). No clipboard side effects."""
+        result = {"val": None}
+
+        def worker():
+            try:
+                import uiautomation as auto
+                ctrl = auto.GetFocusedControl()
+                if ctrl is None:
+                    return
+                tp = None
+                for pid in (auto.PatternId.TextPattern2,
+                            auto.PatternId.TextPattern,
+                            auto.PatternId.TextEditPattern):
+                    try:
+                        tp = ctrl.GetPattern(pid)
+                        if tp is not None:
+                            break
+                    except Exception:
+                        continue
+                if tp is None:
+                    return  # can't tell — leave result as None
+                try:
+                    sels = tp.GetSelection()
+                except Exception:
+                    return
+                if not sels:
+                    result["val"] = False
+                    return
+                text = ""
+                for r in sels:
+                    try:
+                        text += r.GetText(200) or ""
+                    except Exception:
+                        pass
+                result["val"] = bool(text.strip())
+            except Exception:
+                return
+
+        t = threading.Thread(target=worker, daemon=True)
+        t.start()
+        t.join(timeout)
+        return result["val"]
 
     def _selection_toolbar_buttons(self):
         """Build the (label, callback) list for the floating toolbar from the

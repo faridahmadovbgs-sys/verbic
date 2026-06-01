@@ -119,28 +119,34 @@ class TextReplacer:
         # re-pressing it per arrow key.
         #
         # Timing notes (the source of the "lLet" / "whWhat" leftover-prefix
-        # bug some apps showed at 1 ms intervals):
+        # bug — the paste only overwrites part of the typed text because some
+        # Shift+Left presses were dropped, so the selection came up short):
         #   - After pressing Shift, the app's input pipeline (especially
         #     Chrome's browser→renderer IPC) needs a moment to register the
         #     modifier as held. If the first Left arrow arrives before that,
         #     the app treats it as a plain "Left" — moving the caret instead
-        #     of extending the selection — and the final selection comes up
-        #     one character short. A 20 ms post-Shift delay fixes this.
-        #   - Per-arrow interval was 1 ms; raised to 4 ms because some apps
-        #     coalesce or drop arrow events that arrive faster than their
-        #     input loop wakes up.
-        time.sleep(0.04)
+        #     of extending the selection — and the selection is one char short.
+        #   - Per-arrow interval: apps coalesce or drop arrow events that
+        #     arrive faster than their input loop wakes up. 4 ms still dropped
+        #     keys "sometimes" under load / in Electron apps. Now ~13 ms per
+        #     char with a gap between the down and up event so the app registers
+        #     each as a distinct keystroke — slower but reliable, and short
+        #     auto-suggest sentences still complete in well under a second.
+        time.sleep(0.05)
         self._keyboard.press(Key.shift)
-        time.sleep(0.02)
+        time.sleep(0.04)
         try:
             for _ in range(char_count):
                 self._keyboard.press(Key.left)
-                self._keyboard.release(Key.left)
                 time.sleep(0.004)
+                self._keyboard.release(Key.left)
+                time.sleep(0.009)
         finally:
             self._keyboard.release(Key.shift)
 
-        self._paste_with_clipboard(corrected_text, pre_delay=0.04)
+        # Let the final selection settle before the paste overwrites it.
+        time.sleep(0.03)
+        self._paste_with_clipboard(corrected_text, pre_delay=0.05)
 
     def _do_replace_all(self, corrected_text):
         time.sleep(0.04)

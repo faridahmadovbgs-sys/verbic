@@ -296,25 +296,45 @@ class SuggestionWindow:
         self.close()
         return "break"
 
+    @staticmethod
+    def _round_rect_points(x1, y1, x2, y2, r):
+        """Polygon points approximating a rounded rectangle. Use with
+        create_polygon(..., smooth=True) so the corners spline into curves."""
+        return [
+            x1 + r, y1,  x2 - r, y1,  x2, y1,
+            x2, y1 + r,  x2, y2 - r,  x2, y2,
+            x2 - r, y2,  x1 + r, y2,  x1, y2,
+            x1, y2 - r,  x1, y1 + r,  x1, y1,
+        ]
+
     def _build_and_show(self):
-        # Color palette — modern card with an indigo accent stripe. Tk can't
-        # do native rounded corners or drop shadows, so we fake depth with a
-        # one-pixel border (light gray) around a white card and a thin
-        # vertical accent on the left edge.
-        BORDER = "#D1D5DB"   # Tailwind slate-300
+        # Modern card rendered on a Canvas so we get real rounded corners and a
+        # soft(-ish) drop shadow — impossible with plain Tk frames. A magenta
+        # color key is made fully transparent, so everything outside the
+        # rounded card (corners + shadow margin) disappears, leaving a floating
+        # pill instead of a hard rectangle.
+        TRANSPARENT = "#FF00FE"
         CARD_BG = "#FFFFFF"
-        ACCENT = "#6366F1"   # Tailwind indigo-500
-        TEXT_FG = "#111827"  # Tailwind slate-900
-        HINT_FG = "#6B7280"  # Tailwind slate-500
-        KBD_BG = "#F3F4F6"   # Tailwind slate-100
+        CARD_BORDER = "#E5E7EB"  # slate-200
+        ACCENT = "#6366F1"       # indigo-500
+        ACCENT_DK = "#4F46E5"    # indigo-600 (hover)
+        TEXT_FG = "#111827"      # slate-900
+        HINT_FG = "#6B7280"      # slate-500
+        SHADOW = ("#E9EAF0", "#EFF0F5", "#F5F6FA")  # stacked = faux soft shadow
+
+        PAD = 16
+        CARD_W = 380
+        WRAP = CARD_W - 2 * PAD
+        RADIUS = 14
+        BTN_H = 30
+        SHADOW_OFF = 6  # how far the shadow extends past the card
 
         self._window = tk.Tk()
         self._window.overrideredirect(True)
         self._window.attributes("-topmost", True)
-        # Subtle alpha so the overlay doesn't compete with the user's app for
-        # attention. 0.97 ≈ visually opaque but reads as a floating panel.
+        self._window.configure(bg=TRANSPARENT)
         try:
-            self._window.attributes("-alpha", 0.97)
+            self._window.attributes("-transparentcolor", TRANSPARENT)
         except Exception:
             pass
         self._window.geometry("+30000+30000")
@@ -322,108 +342,108 @@ class SuggestionWindow:
         # Apply NOACTIVATE before the window is mapped so it never grabs focus.
         self._apply_no_activate()
 
-        # Outer 1px border via a slightly-larger colored frame.
-        border = tk.Frame(self._window, bg=BORDER, padx=1, pady=1)
-        border.pack()
-
-        # Horizontal layout: accent stripe | card body.
-        body = tk.Frame(border, bg=CARD_BG)
-        body.pack(fill="both", expand=True)
-
-        accent = tk.Frame(body, bg=ACCENT, width=3)
-        accent.pack(side="left", fill="y")
-
-        card = tk.Frame(body, bg=CARD_BG)
-        card.pack(side="left", fill="both", expand=True, padx=0, pady=0)
-
-        # Header row: ✦ mode label on the left, a dismiss × on the right.
-        header_row = tk.Frame(card, bg=CARD_BG)
-        header_row.pack(fill="x", padx=12, pady=(8, 0))
-
-        header = tk.Label(
-            header_row,
-            text=f"✦  {self._header_label}",
-            bg=CARD_BG,
-            fg=ACCENT,
-            font=("Segoe UI Semibold", 8),
+        canvas = tk.Canvas(
+            self._window, bg=TRANSPARENT, highlightthickness=0, bd=0,
+            width=CARD_W + SHADOW_OFF, height=400,
         )
-        header.pack(side="left")
+        canvas.pack()
+        self._canvas = canvas
 
-        close_btn = tk.Label(
-            header_row,
-            text="✕",
-            bg=CARD_BG,
-            fg=HINT_FG,
-            font=("Segoe UI", 9),
-            cursor="hand2",
+        import tkinter.font as tkfont
+        f_header = tkfont.Font(family="Segoe UI Semibold", size=9)
+        f_body = tkfont.Font(family="Segoe UI", size=11)
+        f_btn = tkfont.Font(family="Segoe UI Semibold", size=9)
+        f_link = tkfont.Font(family="Segoe UI", size=9)
+
+        # --- Header (✦ mode label) + close ✕, measured for layout only ---
+        header_y = PAD
+        body_y = header_y + 22
+
+        # --- Body text: create first so we can measure its wrapped height ---
+        body_item = canvas.create_text(
+            PAD, body_y, text=self._suggestion, font=f_body, fill=TEXT_FG,
+            width=WRAP, anchor="nw", justify="left",
         )
-        close_btn.pack(side="right")
-        close_btn.bind("<Button-1>", self._handle_dismiss)
+        bbox = canvas.bbox(body_item)
+        body_bottom = bbox[3] if bbox else body_y + 20
 
-        text_label = tk.Label(
-            card,
-            text=self._suggestion,
-            bg=CARD_BG,
-            fg=TEXT_FG,
-            font=("Segoe UI", 10),
-            wraplength=480,
-            justify="left",
+        # --- Action row geometry ---
+        btn_y = body_bottom + 14
+        apply_text = "Apply (Ctrl+Space)"
+        apply_w = f_btn.measure(apply_text) + 24
+        apply_x1, apply_x2 = PAD, PAD + apply_w
+        copy_x = apply_x2 + 14
+        copy_w = f_link.measure("Copy")
+        dismiss_x = copy_x + copy_w + 18
+        card_bottom = btn_y + BTN_H + PAD
+
+        # --- Draw shadow (stacked, offset) then the card, behind everything ---
+        for i, col in enumerate(SHADOW):
+            off = (len(SHADOW) - i) * 2
+            canvas.create_polygon(
+                self._round_rect_points(off, off, CARD_W + off - 2,
+                                        card_bottom + off - 2, RADIUS),
+                fill=col, outline=col, smooth=True,
+            )
+        card_item = canvas.create_polygon(
+            self._round_rect_points(0, 0, CARD_W, card_bottom, RADIUS),
+            fill=CARD_BG, outline=CARD_BORDER, smooth=True,
         )
-        text_label.pack(anchor="w", padx=12, pady=(4, 8))
+        # Shadows were drawn first (so they're underneath); the card sits above
+        # them but below the text/buttons. Body text was drawn before the card,
+        # so lift it back on top.
+        canvas.tag_raise(body_item)
 
-        # Action row: a filled "Apply (Ctrl+Space)" button + a "Dismiss" link.
-        action_row = tk.Frame(card, bg=CARD_BG)
-        action_row.pack(anchor="w", fill="x", padx=12, pady=(0, 10))
-
-        apply_btn = tk.Label(
-            action_row,
-            text="Apply (Ctrl+Space)",
-            bg=ACCENT,
-            fg="#FFFFFF",
-            font=("Segoe UI Semibold", 9),
-            padx=12,
-            pady=4,
-            cursor="hand2",
+        # --- Header content on top of the card ---
+        canvas.create_text(
+            PAD, header_y, text=f"✦  {self._header_label}", font=f_header,
+            fill=ACCENT, anchor="nw",
         )
-        apply_btn.pack(side="left")
-        apply_btn.bind("<Button-1>", self._handle_click)
-
-        def _apply_enter(_e):
-            apply_btn.configure(bg="#4F46E5")
-
-        def _apply_leave(_e):
-            apply_btn.configure(bg=ACCENT)
-
-        apply_btn.bind("<Enter>", _apply_enter)
-        apply_btn.bind("<Leave>", _apply_leave)
-
-        copy_btn = tk.Label(
-            action_row,
-            text="Copy",
-            bg=CARD_BG,
-            fg=ACCENT,
-            font=("Segoe UI", 9),
-            padx=12,
-            pady=4,
-            cursor="hand2",
+        close_item = canvas.create_text(
+            CARD_W - PAD, header_y, text="✕", font=("Segoe UI", 10),
+            fill=HINT_FG, anchor="ne",
         )
-        copy_btn.pack(side="left")
-        copy_btn.bind("<Button-1>", self._handle_copy)
-        copy_btn.bind("<Enter>", lambda _e: copy_btn.configure(fg="#4F46E5"))
-        copy_btn.bind("<Leave>", lambda _e: copy_btn.configure(fg=ACCENT))
+        canvas.tag_bind(close_item, "<Button-1>", self._handle_dismiss)
+        canvas.tag_bind(close_item, "<Enter>", lambda _e: canvas.itemconfigure(close_item, fill=TEXT_FG))
+        canvas.tag_bind(close_item, "<Leave>", lambda _e: canvas.itemconfigure(close_item, fill=HINT_FG))
 
-        dismiss_btn = tk.Label(
-            action_row,
-            text="Dismiss",
-            bg=CARD_BG,
-            fg=HINT_FG,
-            font=("Segoe UI", 9),
-            padx=12,
-            pady=4,
-            cursor="hand2",
+        # --- Apply button (filled, rounded) ---
+        apply_rect = canvas.create_polygon(
+            self._round_rect_points(apply_x1, btn_y, apply_x2, btn_y + BTN_H, 7),
+            fill=ACCENT, outline=ACCENT, smooth=True,
         )
-        dismiss_btn.pack(side="left")
-        dismiss_btn.bind("<Button-1>", self._handle_dismiss)
+        apply_lbl = canvas.create_text(
+            (apply_x1 + apply_x2) / 2, btn_y + BTN_H / 2,
+            text=apply_text, font=f_btn, fill="#FFFFFF",
+        )
+        for it in (apply_rect, apply_lbl):
+            canvas.tag_bind(it, "<Button-1>", self._handle_click)
+        def _apply_hover(_e, col):
+            canvas.itemconfigure(apply_rect, fill=col, outline=col)
+        canvas.tag_bind(apply_rect, "<Enter>", lambda e: _apply_hover(e, ACCENT_DK))
+        canvas.tag_bind(apply_lbl, "<Enter>", lambda e: _apply_hover(e, ACCENT_DK))
+        canvas.tag_bind(apply_rect, "<Leave>", lambda e: _apply_hover(e, ACCENT))
+        canvas.tag_bind(apply_lbl, "<Leave>", lambda e: _apply_hover(e, ACCENT))
+
+        # --- Copy + Dismiss text buttons ---
+        copy_item = canvas.create_text(
+            copy_x, btn_y + BTN_H / 2, text="Copy", font=f_link,
+            fill=ACCENT, anchor="w",
+        )
+        canvas.tag_bind(copy_item, "<Button-1>", self._handle_copy)
+        canvas.tag_bind(copy_item, "<Enter>", lambda _e: canvas.itemconfigure(copy_item, fill=ACCENT_DK))
+        canvas.tag_bind(copy_item, "<Leave>", lambda _e: canvas.itemconfigure(copy_item, fill=ACCENT))
+
+        dismiss_item = canvas.create_text(
+            dismiss_x, btn_y + BTN_H / 2, text="Dismiss", font=f_link,
+            fill=HINT_FG, anchor="w",
+        )
+        canvas.tag_bind(dismiss_item, "<Button-1>", self._handle_dismiss)
+        canvas.tag_bind(dismiss_item, "<Enter>", lambda _e: canvas.itemconfigure(dismiss_item, fill=TEXT_FG))
+        canvas.tag_bind(dismiss_item, "<Leave>", lambda _e: canvas.itemconfigure(dismiss_item, fill=HINT_FG))
+
+        # Size the canvas/window exactly to the card (+ shadow margin).
+        canvas.configure(width=CARD_W + SHADOW_OFF, height=card_bottom + SHADOW_OFF)
 
         self._window.update_idletasks()
         self._position()

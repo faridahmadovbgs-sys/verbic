@@ -399,8 +399,13 @@ class KeyboardMonitor:
                     self._last_release_time = now
                     self._last_release_pos = (x, y)
                     if dragged or multi_click:
+                        # Tell the host how the selection was made: a drag is a
+                        # reliable text gesture, a multi-click is ambiguous (it
+                        # also fires on app icons / buttons), so the host can
+                        # verify a real selection before showing the toolbar.
+                        kind = "drag" if dragged else "click"
                         try:
-                            self._on_selection_made(x, y)
+                            self._on_selection_made(x, y, kind)
                         except Exception:
                             pass
         except Exception:
