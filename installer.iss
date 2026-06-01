@@ -5,7 +5,7 @@
 ; installed the previous "Grammar Tool" name upgrade cleanly to Verbic.
 
 #define MyAppName       "Verbic"
-#define MyAppVersion    "1.1.1"
+#define MyAppVersion    "1.1.2"
 #define MyAppPublisher  "Sand Castle LLC"
 #define MyAppExeName    "Verbic.exe"
 #define MyAppId         "{{2A8E1B4F-7B3C-4C26-9D1E-9F3F2C7B0A61}}"
@@ -52,7 +52,9 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 Name: "startupicon"; Description: "Start {#MyAppName} when Windows starts"; GroupDescription: "Auto-start:"; Flags: unchecked
 
 [Files]
-Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+; --onedir build: ship the whole dist\Verbic folder (Verbic.exe + _internal\
+; with python3xx.dll and dependencies). recursesubdirs pulls in _internal.
+Source: "dist\Verbic\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "icon.png"; DestDir: "{app}"; Flags: ignoreversion
 Source: "EULA.txt"; DestDir: "{app}"; Flags: ignoreversion
 

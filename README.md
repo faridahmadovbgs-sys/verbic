@@ -7,7 +7,7 @@ whole replies from context you give it, and can even predict how you'd finish a
 sentence. Everything surfaces as a suggestion you explicitly accept — Verbic
 never silently rewrites your words.
 
-Published by **Sand Castle LLC**. Current version: **1.1.1**.
+Published by **Sand Castle LLC**. Current version: **1.1.2**.
 
 > ### 🔑 You need an AI provider before Verbic can do anything
 > Verbic doesn't ship with its own AI — it connects to one you choose. Pick one:
@@ -313,7 +313,8 @@ Run `VerbicSetup.exe`:
 
 ### Option 2 — Standalone
 
-Run `Verbic.exe` directly. No install, no Start-menu shortcut, no auto-start.
+Run `Verbic\Verbic.exe` from the build folder directly (keep the `_internal\`
+folder next to it). No install, no Start-menu shortcut, no auto-start.
 
 ### Option 3 — From source
 
@@ -338,8 +339,11 @@ python main.py
 python build.py
 ```
 
-Produces `dist\Verbic.exe` with publisher metadata embedded
-(CompanyName: Sand Castle LLC).
+Produces a `dist\Verbic\` folder (`Verbic.exe` + an `_internal\` folder with
+`python3xx.dll` and dependencies) with publisher metadata embedded
+(CompanyName: Sand Castle LLC). It's a `--onedir` build — the DLLs sit next to
+the exe instead of being unpacked to a temp folder on each launch, which avoids
+the "Failed to load Python DLL" error during auto-update.
 
 ### Build the installer
 

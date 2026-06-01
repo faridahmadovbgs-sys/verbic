@@ -15,19 +15,25 @@ def create_ico():
     print("Created icon.ico")
 
 def build_exe():
+    # --onedir (not --onefile): ships python3xx.dll and deps in the install
+    # folder so they load directly. --onefile unpacked them to a %TEMP%\_MEIxxxx
+    # folder on every launch, which raced with the installer/Defender during an
+    # auto-update relaunch and produced "Failed to load Python DLL … the
+    # specified module could not be found". onedir also starts faster.
     cmd = [
         sys.executable, "-m", "PyInstaller",
-        "--onefile",
+        "--onedir",
         "--noconsole",
         "--icon=icon.ico",
         "--version-file=version_info.txt",
         "--add-data", "icon.png;.",
         "--add-data", "EULA.txt;.",
         "--name", "Verbic",
+        "--noconfirm",
         "main.py",
     ]
     subprocess.run(cmd, check=True)
-    print("Build complete: dist/Verbic.exe")
+    print("Build complete: dist/Verbic/Verbic.exe")
 
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
