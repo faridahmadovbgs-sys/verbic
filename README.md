@@ -7,7 +7,7 @@ whole replies from context you give it, and can even predict how you'd finish a
 sentence. Everything surfaces as a suggestion you explicitly accept — Verbic
 never silently rewrites your words.
 
-Published by **Sand Castle LLC**. Current version: **1.2.1**.
+Published by **Sand Castle LLC**. Current version: **1.2.2**.
 
 > ### 🔑 You need an AI provider before Verbic can do anything
 > Verbic doesn't ship with its own AI — it connects to one you choose. Pick one:
@@ -269,12 +269,13 @@ are stripped automatically from responses.
 ## Using Ollama (free, fully local)
 
 1. Install Ollama from <https://ollama.com>.
-2. Pull a small instruct model (recommended for grammar):
+2. Pull a small instruct model. For the **fastest** live suggestions:
    ```
-   ollama pull llama3.2:3b
+   ollama pull llama3.2:1b
    ```
-   ~2 GB; roughly one second per correction on most modern CPUs.
-   Alternatives: `qwen2.5:7b`, `llama3.1:8b`.
+   ⚡ ~1.3 GB; sub-second per correction on most CPUs — the recommended default.
+   For a bit more quality at some speed cost: `llama3.2:3b`. Bigger models
+   (`llama3.1:8b`, `70b`) are noticeably slower and not needed for grammar.
 
    > ⚠ Avoid reasoning models (`deepseek-r1`, `qwq`, `o1`-style) — they spend
    > 30+ seconds "thinking" before answering, which breaks live auto-suggest
@@ -383,8 +384,10 @@ suggestion decisions.
 
 ## Configuration file
 
-Settings persist to `config.json` next to the executable (or the source folder
-when running from source). Notable keys:
+Settings persist to `config.json` in your user profile —
+`%APPDATA%\Verbic\config.json` — so they survive app updates (older builds kept
+it next to the executable, which the installer could overwrite, wiping the saved
+API key; that config is migrated automatically on first launch). Notable keys:
 
 | Key | Meaning |
 |-----|---------|

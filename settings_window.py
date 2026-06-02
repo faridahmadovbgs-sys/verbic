@@ -5,7 +5,9 @@ from config import PROVIDERS, PROVIDER_NAMES
 from ollama_client import OllamaClient
 
 
-_RECOMMENDED_OLLAMA_MODELS = ("llama3.2:3b", "qwen2.5:7b")
+# Fastest first — these run live-inline grammar in well under a second.
+_FASTEST_OLLAMA_MODEL = "llama3.2:1b"
+_RECOMMENDED_OLLAMA_MODELS = ("llama3.2:1b", "llama3.2:3b")
 _REASONING_MODEL_HINTS = ("r1", "reason", "thinking", "qwq", "o1")
 
 # Palette (Tailwind-ish).
@@ -200,10 +202,12 @@ class SettingsWindow:
 
             display_items = []
             for name in installed:
-                display_items.append(f"● {name}")
+                tag = "  ⚡ fastest" if name == _FASTEST_OLLAMA_MODEL else ""
+                display_items.append(f"● {name}{tag}")
             for name in curated:
                 if name not in installed_set:
-                    display_items.append(f"○ {name}  (pull required)")
+                    tag = "  ⚡ fastest" if name == _FASTEST_OLLAMA_MODEL else ""
+                    display_items.append(f"○ {name}{tag}  (pull required)")
             model_combo["values"] = display_items
 
             if not running:
@@ -215,22 +219,23 @@ class SettingsWindow:
             elif not installed:
                 ollama_status_label.configure(
                     text=(
-                        "Ollama is running but no models are installed. Open PowerShell and run:\n"
-                        "    ollama pull llama3.2:3b   (recommended for grammar — ~2 GB)\n"
+                        "Ollama is running but no models are installed. For the fastest\n"
+                        "experience, open PowerShell and run:\n"
+                        f"    ollama pull {_FASTEST_OLLAMA_MODEL}   (⚡ fastest — ~1.3 GB, sub-second)\n"
                         "Then click Refresh."
                     ),
                     fg="#b00020",
                 )
                 ollama_link_label.configure(text="Browse models: https://ollama.com/library")
             else:
-                rec = " · ".join(_RECOMMENDED_OLLAMA_MODELS)
-                ollama_status_label.configure(
-                    text=(
-                        f"{len(installed)} model(s) available. Recommended for grammar: {rec}.\n"
-                        "Pull more with:  ollama pull <model-name>"
-                    ),
-                    fg=MUTED,
-                )
+                has_fast = _FASTEST_OLLAMA_MODEL in installed_set
+                if has_fast:
+                    txt = (f"{len(installed)} model(s) available. ⚡ {_FASTEST_OLLAMA_MODEL} is the "
+                           f"fastest — pick it for instant inline suggestions.")
+                else:
+                    txt = (f"{len(installed)} model(s) available. For the fastest experience run:  "
+                           f"ollama pull {_FASTEST_OLLAMA_MODEL}  (⚡ ~1.3 GB), then Refresh.")
+                ollama_status_label.configure(text=txt, fg=MUTED)
                 ollama_link_label.configure(text="Browse more: https://ollama.com/library")
 
         def _update_provider_fields(*_args):

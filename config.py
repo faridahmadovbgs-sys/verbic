@@ -5,8 +5,13 @@ import sys
 PROVIDERS = {
     "ollama": {
         "label": "Ollama (Local)",
-        "default_model": "llama3.1:8b",
-        "models": ["llama3.2:3b", "llama3.1:8b", "llama3.1:70b", "mistral", "gemma2"],
+        # Default to the fastest small model so live inline suggestions feel
+        # instant. llama3.2:1b (~1.3 GB) handles grammar/tone in well under a
+        # second on most CPUs; larger models are slower per correction.
+        "default_model": "llama3.2:1b",
+        # Ordered fastest → most capable.
+        "models": ["llama3.2:1b", "qwen2.5:1.5b", "gemma2:2b", "llama3.2:3b",
+                   "qwen2.5:7b", "llama3.1:8b", "mistral"],
         "needs_api_key": False,
         "base_url": None,
     },
@@ -57,7 +62,23 @@ PROVIDERS = {
 PROVIDER_NAMES = list(PROVIDERS.keys())
 
 
+def _config_dir():
+    # User settings live in %APPDATA%\Verbic — a per-user data location that
+    # app updates never touch. (They used to sit next to the executable, in the
+    # install folder, which the installer rewrites on update — wiping the saved
+    # API key. See _legacy_config_path + the migration in load_config.)
+    base = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA") \
+        or os.path.expanduser("~")
+    return os.path.join(base, "Verbic")
+
+
 def _config_path():
+    return os.path.join(_config_dir(), "config.json")
+
+
+def _legacy_config_path():
+    """Old pre-1.2.2 location: next to the executable (frozen) or source file.
+    Read once for migration so existing users keep their settings."""
     if getattr(sys, "frozen", False):
         base = os.path.dirname(sys.executable)
     else:
@@ -159,6 +180,22 @@ def _default_config():
 def load_config():
     path = _config_path()
     defaults = _default_config()
+
+    # One-time migration: if there's no config in %APPDATA% yet but a legacy
+    # one exists next to the executable, adopt it so the user keeps their API
+    # key and settings across this update.
+    if not os.path.exists(path):
+        legacy = _legacy_config_path()
+        if os.path.abspath(legacy) != os.path.abspath(path) and os.path.exists(legacy):
+            try:
+                import shutil
+                os.makedirs(_config_dir(), exist_ok=True)
+                shutil.copyfile(legacy, path)
+            except Exception:
+                # Couldn't copy — read the legacy file directly this run; the
+                # next save_config() will persist it to the new location.
+                path = legacy
+
     if not os.path.exists(path):
         return defaults
     try:
@@ -224,6 +261,7 @@ def _migrate_old_config(old):
 def save_config(config):
     path = _config_path()
     try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2)
     except Exception:
