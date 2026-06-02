@@ -7,7 +7,7 @@ whole replies from context you give it, and can even predict how you'd finish a
 sentence. Everything surfaces as a suggestion you explicitly accept — Verbic
 never silently rewrites your words.
 
-Published by **Sand Castle LLC**. Current version: **1.2.2**.
+Published by **Sand Castle LLC**. Current version: **1.2.3**.
 
 > ### 🔑 You need an AI provider before Verbic can do anything
 > Verbic doesn't ship with its own AI — it connects to one you choose. Pick one:
@@ -305,13 +305,17 @@ before saving — useful for tuning a model or verifying an API key.
 
 Run `VerbicSetup.exe`:
 
-- **Per-user install** — no UAC prompt; installs to
-  `%LOCALAPPDATA%\Programs\Verbic`
+- **All-users install** to `C:\Program Files\Verbic\` — a known, reviewable
+  location (requires admin/UAC; expected for managed/corporate endpoints)
 - **Optional desktop shortcut** (checkbox during install)
 - **Optional auto-start on login** (checkbox, off by default)
 - **EULA** shown on the License page
 - **Auto-kills** any running Verbic before overwriting (safe re-install)
 - Appears in *Add or Remove Programs* under publisher *Sand Castle LLC*
+
+Settings and logs are stored under `%APPDATA%\Verbic\` (never in the program
+folder or Temp). See [SECURITY.md](SECURITY.md) for network destinations and
+data handling.
 
 > **Windows SmartScreen** may warn the first time if the build isn't yet
 > code-signed. Click **More info → Run anyway**.

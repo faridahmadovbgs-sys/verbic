@@ -1,5 +1,6 @@
 import requests
 from text_utils import clean_llm_output
+from version import APP_VERSION
 
 
 class ClaudeClient:
@@ -17,6 +18,7 @@ class ClaudeClient:
                     "x-api-key": self.api_key,
                     "anthropic-version": "2023-06-01",
                     "Content-Type": "application/json",
+                    "User-Agent": f"Verbic/{APP_VERSION}",
                 },
                 json={
                     "model": self.model,

@@ -11,7 +11,6 @@ running app (AppMutex) and installs over it.
 """
 import os
 import sys
-import tempfile
 import threading
 import subprocess
 import urllib.request
@@ -23,7 +22,19 @@ SITE = "https://www.skyscrum.com"
 VERSION_URL = f"{SITE}/api/verbic-version/"
 DOWNLOAD_URL = f"{SITE}/api/downloads/verbic/"
 
+# Clear, attributable user agent so the SkyScrum version-check/download traffic
+# is never an "unknown executable phoning home".
+_UA = f"Verbic/{APP_VERSION}"
+
 _checking = False
+
+
+def _updates_dir():
+    """Predictable, reviewable location for the downloaded installer — NOT a
+    Temp directory."""
+    base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") \
+        or os.path.expanduser("~")
+    return os.path.join(base, "Verbic", "Updates")
 
 
 def _parse(v):
@@ -49,19 +60,43 @@ def _is_newer(remote, local):
 
 
 def _fetch_latest(timeout=10):
-    req = urllib.request.Request(VERSION_URL, headers={"User-Agent": "Verbic-Updater"})
+    req = urllib.request.Request(VERSION_URL, headers={"User-Agent": _UA})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
 def _download(url, dest, timeout=120):
-    req = urllib.request.Request(url, headers={"User-Agent": "Verbic-Updater"})
+    req = urllib.request.Request(url, headers={"User-Agent": _UA})
     with urllib.request.urlopen(req, timeout=timeout) as resp, open(dest, "wb") as out:
         while True:
             chunk = resp.read(64 * 1024)
             if not chunk:
                 break
             out.write(chunk)
+
+
+def check_and_notify(notify=None, timeout=10):
+    """Startup check: if a newer version exists, NOTIFY the user — but do not
+    download or install anything. The user installs deliberately via the tray
+    'Check for Updates' action. This avoids silent self-updating on managed
+    devices (a malware-persistence signal) while still surfacing updates."""
+    global _checking
+    if _checking:
+        return
+    _checking = True
+    try:
+        info = _fetch_latest(timeout=timeout)
+        latest = info.get("version", "")
+        if latest and _is_newer(latest, APP_VERSION) and notify:
+            notify("Verbic",
+                   f"Verbic {latest} is available. Open the tray menu → "
+                   f"“Check for Updates” to install.")
+    except Exception:
+        # Stay silent on the startup check — surface errors only on the
+        # user-initiated manual check.
+        pass
+    finally:
+        _checking = False
 
 
 def check_for_updates(silent=True, notify=None, ask=None):
@@ -90,7 +125,9 @@ def check_for_updates(silent=True, notify=None, ask=None):
         if notify:
             notify("Verbic", f"Downloading update {latest}…")
 
-        dest = os.path.join(tempfile.gettempdir(), f"VerbicSetup-{latest}.exe")
+        updates_dir = _updates_dir()
+        os.makedirs(updates_dir, exist_ok=True)
+        dest = os.path.join(updates_dir, f"VerbicSetup-{latest}.exe")
         _download(info.get("windows") or DOWNLOAD_URL, dest)
 
         # Launch the installer detached and exit so it can replace the running app.

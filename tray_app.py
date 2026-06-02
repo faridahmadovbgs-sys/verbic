@@ -1256,7 +1256,10 @@ class GrammarTrayApp:
         # Show first-run welcome dialog after a short delay so the tray icon
         # has a chance to appear behind it.
         threading.Timer(0.3, self._maybe_show_welcome).start()
-        # Silently check for updates a few seconds after launch; auto-installs if newer.
-        threading.Timer(4.0, lambda: updater.check_for_updates(
-            silent=True, notify=self._notify, ask=None)).start()
+        # Startup update behavior: a single, attributable version check ~12s
+        # after launch that only NOTIFIES if a newer version exists. It never
+        # downloads or installs on its own — the user installs deliberately via
+        # tray → "Check for Updates". This avoids silent self-updating on
+        # managed devices (a malware-persistence signal).
+        threading.Timer(12.0, lambda: updater.check_and_notify(notify=self._notify)).start()
         self._icon.run()

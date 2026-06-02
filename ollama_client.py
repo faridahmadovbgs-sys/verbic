@@ -1,5 +1,10 @@
 import requests
 from text_utils import clean_llm_output
+from version import APP_VERSION
+
+# Clear, identifiable user agent on every request (localhost, but consistent
+# with the external clients so traffic is always attributable to Verbic).
+_HEADERS = {"User-Agent": f"Verbic/{APP_VERSION}"}
 
 
 class OllamaClient:
@@ -25,6 +30,7 @@ class OllamaClient:
                         "top_p": 0.9,
                     },
                 },
+                headers=_HEADERS,
                 timeout=180,
             )
             if response.status_code == 200:
@@ -49,6 +55,7 @@ class OllamaClient:
                     "keep_alive": "30m",
                     "options": {"num_predict": 1},
                 },
+                headers=_HEADERS,
                 timeout=timeout,
             )
             return response.status_code == 200
@@ -69,7 +76,7 @@ class OllamaClient:
         is_running=True with an empty list means Ollama is up but no models pulled.
         """
         try:
-            response = requests.get(f"{base_url}/api/tags", timeout=timeout)
+            response = requests.get(f"{base_url}/api/tags", headers=_HEADERS, timeout=timeout)
             if response.status_code != 200:
                 return (False, [])
             data = response.json() or {}

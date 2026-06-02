@@ -1,5 +1,6 @@
 import requests
 from text_utils import clean_llm_output
+from version import APP_VERSION
 
 
 class OpenAICompatibleClient:
@@ -18,6 +19,7 @@ class OpenAICompatibleClient:
                 headers={
                     "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json",
+                    "User-Agent": f"Verbic/{APP_VERSION}",
                 },
                 json={
                     "model": self.model,
