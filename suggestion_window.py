@@ -264,12 +264,15 @@ class SuggestionWindow:
         return False
 
     def __init__(self, suggestion_text, on_click=None, on_dismiss=None, on_copy=None,
-                 header_label=None, anchor=None):
+                 header_label=None, anchor=None, allow_apply=True):
         self._suggestion = suggestion_text
         self._on_click = on_click
         self._on_dismiss = on_dismiss
         self._on_copy = on_copy
         self._header_label = header_label or "Suggested edit"
+        # When False, the Apply button is hidden (Copy + Dismiss only). Used by
+        # Answer/Fix overlays where applying in-place is unreliable.
+        self._allow_apply = allow_apply
         # When set to (x, y), the overlay anchors there instead of hunting for
         # the caret. Used by toolbar actions so the popup lands on the monitor
         # the user is working on — caret-hunting fallbacks can place it on a
@@ -395,23 +398,38 @@ class SuggestionWindow:
         action_row = tk.Frame(card, bg=CARD_BG)
         action_row.pack(anchor="w", fill="x", padx=12, pady=(0, 10))
 
-        apply_btn = tk.Label(
-            action_row, text="Apply (Ctrl+Space)", bg=ACCENT, fg="#FFFFFF",
-            font=("Segoe UI Semibold", 9), padx=12, pady=4, cursor="hand2",
-        )
-        apply_btn.pack(side="left")
-        apply_btn.bind("<Button-1>", self._handle_click)
-        apply_btn.bind("<Enter>", lambda _e: apply_btn.configure(bg=ACCENT_DK))
-        apply_btn.bind("<Leave>", lambda _e: apply_btn.configure(bg=ACCENT))
+        if self._allow_apply:
+            # Auto-suggest / prediction: Apply (filled, primary) + Copy + Dismiss.
+            apply_btn = tk.Label(
+                action_row, text="Apply (Ctrl+Space)", bg=ACCENT, fg="#FFFFFF",
+                font=("Segoe UI Semibold", 9), padx=12, pady=4, cursor="hand2",
+            )
+            apply_btn.pack(side="left")
+            apply_btn.bind("<Button-1>", self._handle_click)
+            apply_btn.bind("<Enter>", lambda _e: apply_btn.configure(bg=ACCENT_DK))
+            apply_btn.bind("<Leave>", lambda _e: apply_btn.configure(bg=ACCENT))
 
-        copy_btn = tk.Label(
-            action_row, text="Copy", bg=CARD_BG, fg=ACCENT,
-            font=("Segoe UI", 9), padx=12, pady=4, cursor="hand2",
-        )
-        copy_btn.pack(side="left")
-        copy_btn.bind("<Button-1>", self._handle_copy)
-        copy_btn.bind("<Enter>", lambda _e: copy_btn.configure(fg=ACCENT_DK))
-        copy_btn.bind("<Leave>", lambda _e: copy_btn.configure(fg=ACCENT))
+            copy_btn = tk.Label(
+                action_row, text="Copy", bg=CARD_BG, fg=ACCENT,
+                font=("Segoe UI", 9), padx=12, pady=4, cursor="hand2",
+            )
+            copy_btn.pack(side="left")
+        else:
+            # Answer / Fix: no Apply — Copy is the primary (filled) action.
+            copy_btn = tk.Label(
+                action_row, text="Copy", bg=ACCENT, fg="#FFFFFF",
+                font=("Segoe UI Semibold", 9), padx=12, pady=4, cursor="hand2",
+            )
+            copy_btn.pack(side="left")
+
+        if self._allow_apply:
+            copy_btn.bind("<Button-1>", self._handle_copy)
+            copy_btn.bind("<Enter>", lambda _e: copy_btn.configure(fg=ACCENT_DK))
+            copy_btn.bind("<Leave>", lambda _e: copy_btn.configure(fg=ACCENT))
+        else:
+            copy_btn.bind("<Button-1>", self._handle_copy)
+            copy_btn.bind("<Enter>", lambda _e: copy_btn.configure(bg=ACCENT_DK))
+            copy_btn.bind("<Leave>", lambda _e: copy_btn.configure(bg=ACCENT))
 
         dismiss_btn = tk.Label(
             action_row, text="Dismiss", bg=CARD_BG, fg=HINT_FG,

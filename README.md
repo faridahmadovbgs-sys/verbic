@@ -7,7 +7,7 @@ whole replies from context you give it, and can even predict how you'd finish a
 sentence. Everything surfaces as a suggestion you explicitly accept — Verbic
 never silently rewrites your words.
 
-Published by **Sand Castle LLC**. Current version: **1.1.9**.
+Published by **Sand Castle LLC**. Current version: **1.2.0**.
 
 > ### 🔑 You need an AI provider before Verbic can do anything
 > Verbic doesn't ship with its own AI — it connects to one you choose. Pick one:
@@ -114,7 +114,7 @@ All four hotkeys are **rebindable** (tray → **Shortcuts & Buttons**). Defaults
 | **Ctrl+Space** | Apply the visible suggestion — otherwise fix selection / typed text |
 | **Ctrl+Alt+X** | Set the highlighted text as your writing context |
 | **Ctrl+Alt+A** | Draft an answer from the context / selection |
-| **Apply** button (in overlay) | Apply the suggestion |
+| **Apply** button (auto-suggest only) | Apply the suggestion in place |
 | **Copy** button (in overlay) | Copy the suggestion to the clipboard |
 | **Dismiss** button / ✕ | Discard the suggestion |
 | Double-click tray icon | Open Settings |
@@ -163,9 +163,13 @@ the Win32 caret, UI Automation text selection (for Electron/Chromium apps), the
 focused control bounds, the mouse cursor, and finally the window rectangle.
 
 Each overlay shows a header describing what it is (e.g. *✦ Grammar ·
-Professional*, *✦ Draft answer*, *✦ Predictive (Flow)*) and three actions:
-**Apply (Ctrl+Space)**, **Copy** (put it on the clipboard instead of applying),
-and **Dismiss**.
+Professional*, *✦ Draft answer*) and action buttons:
+
+- **Auto-suggest / prediction** popups (the caret is in the field) offer
+  **Apply (Ctrl+Space)**, **Copy**, and **Dismiss**.
+- **Draft answer** and **toolbar Fix** popups are **copy-only** — **Copy** and
+  **Dismiss** (no Apply). Applying in place is unreliable once focus has moved,
+  so you copy the result and paste it where you want it.
 
 ### Writing context
 

@@ -44,6 +44,11 @@ class GrammarTrayApp:
         # When True, accepting pastes over the current selection (Fix action
         # from the floating toolbar, where text is already selected).
         self._pending_paste_selection = False
+        # Whether the current overlay offers an Apply action. Only auto-suggest
+        # grammar (and predictions) — where the caret is in the field — apply
+        # cleanly. Answer/Fix from the toolbar are copy-only (Apply there pasted
+        # unreliably because focus is elsewhere).
+        self._pending_allow_apply = True
         # Floating action toolbar shown after a selection.
         self._selection_button = None
         self._selection_button_timer = None
@@ -359,7 +364,7 @@ class GrammarTrayApp:
         return stripped or None
 
     def _show_suggestion(self, corrected, char_count, is_insert=False, paste_selection=False,
-                         header=None, anchor=None):
+                         header=None, anchor=None, allow_apply=True):
         existing = self._suggestion_window
         if existing is not None:
             try:
@@ -374,6 +379,7 @@ class GrammarTrayApp:
             on_copy=self._on_overlay_copy,
             header_label=header or self._active_mode_label(),
             anchor=anchor,
+            allow_apply=allow_apply,
         )
         self._suggestion_window = overlay
         self._pending_corrected = corrected
@@ -383,6 +389,7 @@ class GrammarTrayApp:
         self._pending_char_count = char_count
         self._pending_is_insert = is_insert
         self._pending_paste_selection = paste_selection
+        self._pending_allow_apply = allow_apply
 
         overlay.open()
 
@@ -392,6 +399,7 @@ class GrammarTrayApp:
             self._pending_char_count = 0
             self._pending_is_insert = False
             self._pending_paste_selection = False
+            self._pending_allow_apply = True
 
     def _on_typing(self):
         with self._suggest_lock:
@@ -479,12 +487,27 @@ class GrammarTrayApp:
         self._on_overlay_dismiss()
         if not text:
             return
-        try:
-            from text_replacer import _set_clipboard_text
-            _set_clipboard_text(text)
-            self._notify("Verbic", "Copied to clipboard.")
-        except Exception:
-            pass
+        # Run on a worker thread with retry+verify: a single SetClipboardData
+        # silently fails when another app (clipboard manager, browser) holds
+        # the clipboard for an instant, which left the OLD clipboard content in
+        # place — so paste produced something unrelated. Retry until a read-back
+        # confirms our text actually landed.
+        threading.Thread(target=self._do_copy_to_clipboard, args=(text,), daemon=True).start()
+
+    def _do_copy_to_clipboard(self, text):
+        from text_replacer import _get_clipboard_text, _set_clipboard_text
+        ok = False
+        for _ in range(8):
+            try:
+                if _set_clipboard_text(text):
+                    time.sleep(0.03)
+                    if _get_clipboard_text() == text:
+                        ok = True
+                        break
+            except Exception:
+                pass
+            time.sleep(0.05)
+        self._notify("Verbic", "Copied to clipboard." if ok else "Copy failed — please try again.")
 
     def _active_mode_label(self):
         """Human-readable label for the overlay header describing what kind of
@@ -510,6 +533,10 @@ class GrammarTrayApp:
         paste_selection = self._pending_paste_selection
         if overlay is None or not corrected:
             return False
+        # Answer/Fix overlays are copy-only — Ctrl+Space must not apply them.
+        # Return True so the accept-hotkey doesn't fall through to a manual fix.
+        if not self._pending_allow_apply:
+            return True
 
         try:
             overlay.close()
@@ -1062,7 +1089,8 @@ class GrammarTrayApp:
         # Speculation mode may have pre-drafted this exact question already.
         if self._speculative_answer and self._speculative_answer_for == question:
             _dlog("tray", "speculation: using pre-drafted answer")
-            self._show_suggestion(self._speculative_answer, 0, is_insert=True, header="Draft answer", anchor=anchor)
+            self._show_suggestion(self._speculative_answer, 0, is_insert=True,
+                                  header="Draft answer", anchor=anchor, allow_apply=False)
             return
 
         prompt = self.prompt_builder.build_answer(question, writing_context=self._writing_context or None)
@@ -1070,9 +1098,9 @@ class GrammarTrayApp:
         if not answer or not answer.strip():
             self._notify("Verbic", self._provider_failure_message())
             return
-        # Insert mode: there's no typed text to replace, so char_count=0 and
-        # accepting pastes the answer at the caret.
-        self._show_suggestion(answer.strip(), 0, is_insert=True, header="Draft answer", anchor=anchor)
+        # Answer is copy-only: the user pastes it where they want.
+        self._show_suggestion(answer.strip(), 0, is_insert=True,
+                              header="Draft answer", anchor=anchor, allow_apply=False)
 
     def _fix_selection(self, selection=None, anchor=None):
         """Toolbar 'Fix' action — correct the selection and show the result;
@@ -1095,7 +1123,9 @@ class GrammarTrayApp:
         if not self._looks_like_valid_correction(selected, corrected):
             self._notify("Verbic", "The model returned an unusable response.")
             return
-        self._show_suggestion(corrected.strip(), 0, paste_selection=True, anchor=anchor)
+        # Fix is copy-only: pasting over the selection is unreliable once focus
+        # has moved, so the user copies the corrected text instead.
+        self._show_suggestion(corrected.strip(), 0, paste_selection=True, anchor=anchor, allow_apply=False)
 
     def _context_menu_label(self, item):
         if self._writing_context:

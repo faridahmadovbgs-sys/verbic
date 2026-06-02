@@ -24,6 +24,7 @@ def _make_app(options=None, engine="ai", provider="ollama"):
     app._pending_char_count = 0
     app._pending_is_insert = False
     app._pending_paste_selection = False
+    app._pending_allow_apply = True
     app._selection_button = None
     app._selection_button_timer = None
     return app
