@@ -903,18 +903,20 @@ class GrammarTrayApp:
         # source app still has focus and the selection is live. Capturing later
         # (when a toolbar button is clicked) raced with the toolbar window /
         # focus and frequently came back empty, so Answer/Fix did nothing.
-        if kind == "click":
-            # A double/triple-click also lands on icons / buttons / list items.
-            # Only show the toolbar when UIA confirms a real text selection, so
-            # it doesn't pop on every click.
-            if self._focused_has_selection() is not True:
-                return
         selection = self._get_selected_text()
-        # Show the toolbar even if the capture came back empty — the user made a
-        # deliberate drag and expects the toolbar. The actions will re-capture
-        # live at click time if needed. (Gating the toolbar on capture success
-        # meant a single flaky Ctrl+C hid the toolbar entirely.)
         sel = selection.strip() if (selection and selection.strip()) else None
+
+        # The capture result IS the gate for a double/triple-click: a click that
+        # selected a word/line gives text → show; a click on an app icon /
+        # button gives nothing → don't show. (We used to gate clicks on a UIA
+        # selection check, but UIA reports an empty selection in many apps even
+        # when a word IS selected, which broke double-click-to-highlight.)
+        if kind == "click" and not sel:
+            _dlog("tray", "toolbar: click with no selection — skip")
+            return
+
+        # A drag is a deliberate text gesture, so show the toolbar even if the
+        # capture came back empty; the actions re-capture live at click time.
         _dlog("tray", f"toolbar: show ({kind}) captured={'yes' if sel else 'no'}")
         self._show_selection_button(x, y, sel)
 
