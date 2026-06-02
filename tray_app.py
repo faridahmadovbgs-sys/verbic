@@ -507,7 +507,10 @@ class GrammarTrayApp:
             except Exception:
                 pass
             time.sleep(0.05)
-        self._notify("Verbic", "Copied to clipboard." if ok else "Copy failed — please try again.")
+        # No toast on success — the overlay closing is feedback enough. Only
+        # surface a notification if the copy genuinely failed.
+        if not ok:
+            self._notify("Verbic", "Copy failed — please try again.")
 
     def _active_mode_label(self):
         """Human-readable label for the overlay header describing what kind of
@@ -683,22 +686,14 @@ class GrammarTrayApp:
             self.monitor.resume()
 
     def _notify(self, title, message):
-        # pystray.Icon.notify uses Shell_NotifyIcon balloon tips — reliable
-        # on Windows 10/11. The old win10toast path used legacy WinRT APIs
-        # that no-op silently on many Win11 builds, making every "auto-suggest
-        # failed because…" message invisible to the user.
+        # Use only pystray's Shell_NotifyIcon balloon (shows the Verbic tray
+        # icon). The old win10toast fallback spawned a separate Python-based
+        # toast that read as a stray "Python" popup — dropped entirely.
         if self._icon is not None:
             try:
                 self._icon.notify(message, title=title)
-                return
             except Exception:
                 pass
-        try:
-            from win10toast import ToastNotifier
-            toaster = ToastNotifier()
-            toaster.show_toast(title, message, duration=3, threaded=True)
-        except Exception:
-            pass
 
     def _apply_runtime_config(self, new_config, rebuild_client=False):
         """Persist `new_config` and apply the parts that affect live behavior
@@ -883,14 +878,14 @@ class GrammarTrayApp:
         self._writing_context = text
         self._config["writing_context"] = text
         save_config(self._config)
+        # No toast — the tray menu's "Context: …" line and tooltip already
+        # reflect the active context, so a popup on every set is just noise.
         try:
             if self._icon is not None:
                 self._icon.update_menu()
                 self._refresh_tooltip()
         except Exception:
             pass
-        preview = text[:60] + "…" if len(text) > 60 else text
-        self._notify("Verbic", f"Context set: {preview}")
 
         # Speculation mode: eagerly pre-draft the answer so pressing the answer
         # hotkey later returns instantly.

@@ -8,6 +8,18 @@ from ollama_client import OllamaClient
 _RECOMMENDED_OLLAMA_MODELS = ("llama3.2:3b", "qwen2.5:7b")
 _REASONING_MODEL_HINTS = ("r1", "reason", "thinking", "qwq", "o1")
 
+# Palette (Tailwind-ish).
+HEADER_BG = "#6366F1"   # indigo-500
+ACCENT = "#6366F1"
+ACCENT_DK = "#4F46E5"   # indigo-600
+BG = "#FFFFFF"
+PANEL = "#F8F9FC"       # very light gray panel
+BORDER = "#E5E7EB"      # slate-200
+TEXT = "#111827"        # slate-900
+MUTED = "#6B7280"       # slate-500
+SECTION = "#9CA3AF"     # slate-400 (section captions)
+LINK = "#4F46E5"
+
 
 def _is_reasoning_model(name):
     if not name:
@@ -39,6 +51,30 @@ class SettingsWindow:
         self._build_test_client = build_test_client
         self._window = None
 
+    def _init_style(self):
+        style = ttk.Style(self._window)
+        try:
+            style.theme_use("clam")  # only theme that honors custom colors well
+        except Exception:
+            pass
+        style.configure("TFrame", background=BG)
+        style.configure("Panel.TFrame", background=PANEL)
+        style.configure("TLabel", background=BG, foreground=TEXT, font=("Segoe UI", 10))
+        style.configure("Section.TLabel", background=BG, foreground=SECTION,
+                        font=("Segoe UI Semibold", 8))
+        style.configure("Muted.TLabel", background=BG, foreground=MUTED, font=("Segoe UI", 9))
+        style.configure("TButton", font=("Segoe UI", 9), padding=6,
+                        background=PANEL, foreground=TEXT, borderwidth=1)
+        style.map("TButton", background=[("active", "#EEF0F5")])
+        style.configure("Accent.TButton", font=("Segoe UI Semibold", 10), padding=(18, 8),
+                        background=ACCENT, foreground="#FFFFFF", borderwidth=0)
+        style.map("Accent.TButton",
+                  background=[("active", ACCENT_DK), ("pressed", ACCENT_DK)],
+                  foreground=[("disabled", "#E5E7EB")])
+        style.configure("TCombobox", padding=5, foreground=TEXT)
+        style.configure("TEntry", padding=5, foreground=TEXT)
+        style.configure("TSeparator", background=BORDER)
+
     def open(self):
         if self._window is not None:
             self._window.lift()
@@ -46,10 +82,10 @@ class SettingsWindow:
 
         self._window = tk.Tk()
         self._window.title("Verbic — Settings")
-        self._window.geometry("580x720")
-        self._window.resizable(False, False)
-        # Bring the window to front and grab focus, otherwise it can appear
-        # behind whatever app the user was using.
+        self._window.geometry("600x700")
+        self._window.minsize(600, 560)
+        self._window.resizable(False, True)
+        self._window.configure(bg=BG)
         try:
             self._window.attributes("-topmost", True)
             self._window.update_idletasks()
@@ -59,46 +95,71 @@ class SettingsWindow:
         except Exception:
             pass
 
-        frame = ttk.Frame(self._window, padding=20)
+        self._init_style()
+
+        # ---------- Header ----------
+        header = tk.Frame(self._window, bg=HEADER_BG, height=72)
+        header.pack(fill="x", side="top")
+        header.pack_propagate(False)
+        hin = tk.Frame(header, bg=HEADER_BG)
+        hin.pack(side="left", padx=20, pady=14)
+        badge = tk.Label(hin, text="V", bg="#FFFFFF", fg=HEADER_BG,
+                         font=("Segoe UI", 16, "bold"), width=2, height=1)
+        badge.pack(side="left", padx=(0, 12))
+        htext = tk.Frame(hin, bg=HEADER_BG)
+        htext.pack(side="left")
+        tk.Label(htext, text="Settings", bg=HEADER_BG, fg="#FFFFFF",
+                 font=("Segoe UI", 14, "bold")).pack(anchor="w")
+        tk.Label(htext, text="Write better. Everywhere.", bg=HEADER_BG, fg="#E0E7FF",
+                 font=("Segoe UI", 9, "italic")).pack(anchor="w")
+
+        # ---------- Footer (packed before content so it stays pinned) ----------
+        footer = tk.Frame(self._window, bg=PANEL, height=60)
+        footer.pack(fill="x", side="bottom")
+        footer.pack_propagate(False)
+        tk.Frame(self._window, bg=BORDER, height=1).pack(fill="x", side="bottom")
+        save_button = ttk.Button(footer, text="Save", style="Accent.TButton")
+        save_button.pack(side="right", padx=20, pady=12)
+        cancel_button = ttk.Button(footer, text="Cancel")
+        cancel_button.pack(side="right", padx=(0, 8), pady=12)
+
+        # ---------- Content ----------
+        frame = ttk.Frame(self._window, padding=(22, 18))
         frame.pack(fill="both", expand=True)
+        frame.columnconfigure(1, weight=1)
 
         providers_data = self._config.get("providers", {})
 
         # ----- Provider -----
-        # Verbic runs exclusively on the configured AI provider, so the provider
-        # picker is always shown (no engine selector / offline mode).
-        ttk.Label(frame, text="AI Provider:").grid(row=0, column=0, sticky="w", pady=5)
+        ttk.Label(frame, text="AI PROVIDER", style="Section.TLabel").grid(
+            row=0, column=0, columnspan=3, sticky="w", pady=(0, 4))
         provider_var = tk.StringVar(value=self._config.get("provider", "ollama"))
         provider_labels = [PROVIDERS[p]["label"] for p in PROVIDER_NAMES]
         provider_combo = ttk.Combobox(
-            frame, textvariable=provider_var, width=36, values=provider_labels, state="readonly"
+            frame, textvariable=provider_var, width=40, values=provider_labels, state="readonly"
         )
         provider_combo.set(PROVIDERS[provider_var.get()]["label"])
-        provider_combo.grid(row=0, column=1, columnspan=2, pady=5, padx=(10, 0), sticky="w")
+        provider_combo.grid(row=1, column=0, columnspan=3, pady=(0, 12), sticky="ew")
 
-        ttk.Separator(frame, orient="horizontal").grid(
-            row=1, column=0, columnspan=3, sticky="ew", pady=4
-        )
-
-        api_key_label = ttk.Label(frame, text="API Key:")
+        api_key_label = ttk.Label(frame, text="API KEY", style="Section.TLabel")
         api_key_var = tk.StringVar()
-        api_key_entry = ttk.Entry(frame, textvariable=api_key_var, width=38, show="*")
+        api_key_entry = ttk.Entry(frame, textvariable=api_key_var, show="•")
 
-        model_label = ttk.Label(frame, text="Model:")
+        model_label = ttk.Label(frame, text="MODEL", style="Section.TLabel")
         model_var = tk.StringVar()
-        model_combo = ttk.Combobox(frame, textvariable=model_var, width=30)
-        refresh_button = ttk.Button(frame, text="Refresh", width=8)
+        model_combo = ttk.Combobox(frame, textvariable=model_var, width=32)
+        refresh_button = ttk.Button(frame, text="Refresh", width=9)
 
-        base_url_label = ttk.Label(frame, text="Base URL:")
+        base_url_label = ttk.Label(frame, text="BASE URL", style="Section.TLabel")
         base_url_var = tk.StringVar()
-        base_url_entry = ttk.Entry(frame, textvariable=base_url_var, width=38)
+        base_url_entry = ttk.Entry(frame, textvariable=base_url_var)
 
         ollama_status_label = tk.Label(
-            frame, text="", justify="left", anchor="w", wraplength=500,
-            font=("Segoe UI", 9), fg="#444444",
+            frame, text="", justify="left", anchor="w", wraplength=520,
+            font=("Segoe UI", 9), fg=MUTED, bg=BG,
         )
         ollama_link_label = tk.Label(
-            frame, text="", cursor="hand2", fg="#1a73e8",
+            frame, text="", cursor="hand2", fg=LINK, bg=BG,
             font=("Segoe UI", 9, "underline"),
         )
         ollama_link_label.bind("<Button-1>", lambda _e: webbrowser.open("https://ollama.com"))
@@ -112,27 +173,18 @@ class SettingsWindow:
                 "can take 30+ seconds — they are NOT recommended for live auto-suggest. "
                 "For best results pick a small instruct model like llama3.2:3b."
             ),
-            justify="left", anchor="w", wraplength=500,
-            font=("Segoe UI", 8), fg="#777777",
+            justify="left", anchor="w", wraplength=520,
+            font=("Segoe UI", 8), fg=SECTION, bg=BG,
         )
 
         model_warning_label = tk.Label(
-            frame, text="", justify="left", anchor="w", wraplength=500,
-            font=("Segoe UI", 9, "bold"), fg="#b8860b",
+            frame, text="", justify="left", anchor="w", wraplength=520,
+            font=("Segoe UI", 9, "bold"), fg="#b8860b", bg="#FEF9E7",
+            padx=8, pady=5,
         )
-
-        # ----- Hotkey row -----
-        hotkey_label = ttk.Label(frame, text="Hotkeys:")
-        hotkey_value = ttk.Label(
-            frame, text="Customize in tray → “Shortcuts & Buttons”",
-            foreground="gray",
-        )
-
-        # ----- Save button -----
-        save_button = ttk.Button(frame, text="Save")
 
         # === Helpers ===
-        PROV_ROW_BASE = 2  # provider detail rows start here (after picker + separator)
+        PROV_ROW_BASE = 2  # provider detail rows start here
 
         def _provider_key():
             label = provider_var.get()
@@ -177,7 +229,7 @@ class SettingsWindow:
                         f"{len(installed)} model(s) available. Recommended for grammar: {rec}.\n"
                         "Pull more with:  ollama pull <model-name>"
                     ),
-                    fg="#444444",
+                    fg=MUTED,
                 )
                 ollama_link_label.configure(text="Browse more: https://ollama.com/library")
 
@@ -187,21 +239,21 @@ class SettingsWindow:
             saved = providers_data.get(key, {})
 
             if info["needs_api_key"]:
-                api_key_label.grid(row=PROV_ROW_BASE + 2, column=0, sticky="w", pady=5)
-                api_key_entry.grid(row=PROV_ROW_BASE + 2, column=1, columnspan=2, pady=5, padx=(10, 0), sticky="w")
+                api_key_label.grid(row=PROV_ROW_BASE + 2, column=0, columnspan=3, sticky="w", pady=(2, 4))
+                api_key_entry.grid(row=PROV_ROW_BASE + 3, column=0, columnspan=3, pady=(0, 12), sticky="ew")
                 api_key_var.set(saved.get("api_key", ""))
             else:
                 api_key_label.grid_remove()
                 api_key_entry.grid_remove()
                 api_key_var.set("")
 
-            model_label.grid(row=PROV_ROW_BASE + 3, column=0, sticky="w", pady=5)
-            model_combo.grid(row=PROV_ROW_BASE + 3, column=1, pady=5, padx=(10, 0), sticky="w")
+            model_label.grid(row=PROV_ROW_BASE + 4, column=0, columnspan=3, sticky="w", pady=(2, 4))
+            model_combo.grid(row=PROV_ROW_BASE + 5, column=0, columnspan=2, pady=(0, 4), sticky="ew")
             if key == "ollama":
-                refresh_button.grid(row=PROV_ROW_BASE + 3, column=2, pady=5, padx=(6, 0), sticky="w")
-                ollama_status_label.grid(row=PROV_ROW_BASE + 4, column=0, columnspan=3, sticky="w", pady=(6, 2))
-                ollama_link_label.grid(row=PROV_ROW_BASE + 5, column=0, columnspan=3, sticky="w", pady=(0, 4))
-                ollama_perf_label.grid(row=PROV_ROW_BASE + 6, column=0, columnspan=3, sticky="w", pady=(2, 2))
+                refresh_button.grid(row=PROV_ROW_BASE + 5, column=2, pady=(0, 4), padx=(8, 0), sticky="e")
+                ollama_status_label.grid(row=PROV_ROW_BASE + 6, column=0, columnspan=3, sticky="w", pady=(4, 2))
+                ollama_link_label.grid(row=PROV_ROW_BASE + 7, column=0, columnspan=3, sticky="w", pady=(0, 4))
+                ollama_perf_label.grid(row=PROV_ROW_BASE + 8, column=0, columnspan=3, sticky="w", pady=(2, 6))
                 _refresh_ollama_models()
             else:
                 refresh_button.grid_remove()
@@ -213,8 +265,8 @@ class SettingsWindow:
             _update_model_warning()
 
             if key == "custom":
-                base_url_label.grid(row=PROV_ROW_BASE + 7, column=0, sticky="w", pady=5)
-                base_url_entry.grid(row=PROV_ROW_BASE + 7, column=1, columnspan=2, pady=5, padx=(10, 0), sticky="w")
+                base_url_label.grid(row=PROV_ROW_BASE + 10, column=0, columnspan=3, sticky="w", pady=(2, 4))
+                base_url_entry.grid(row=PROV_ROW_BASE + 11, column=0, columnspan=3, pady=(0, 8), sticky="ew")
                 base_url_var.set(saved.get("base_url", ""))
             else:
                 base_url_label.grid_remove()
@@ -238,7 +290,7 @@ class SettingsWindow:
                         "model (e.g. llama3.2:3b) for fast inline suggestions."
                     )
                 )
-                model_warning_label.grid(row=PROV_ROW_BASE + 8, column=0, columnspan=3, sticky="w", pady=(2, 2))
+                model_warning_label.grid(row=PROV_ROW_BASE + 9, column=0, columnspan=3, sticky="ew", pady=(2, 4))
             else:
                 model_warning_label.grid_remove()
 
@@ -246,22 +298,33 @@ class SettingsWindow:
             _on_model_picked(event)
             _update_model_warning()
 
-        # ----- Test correction -----
-        test_label = ttk.Label(frame, text="Test:")
-        test_input = tk.Text(frame, height=2, width=44, font=("Segoe UI", 9), wrap="word")
+        # ----- Test -----
+        TEST_ROW = PROV_ROW_BASE + 13
+        ttk.Separator(frame, orient="horizontal").grid(
+            row=TEST_ROW - 1, column=0, columnspan=3, sticky="ew", pady=12
+        )
+        ttk.Label(frame, text="TEST YOUR SETUP", style="Section.TLabel").grid(
+            row=TEST_ROW, column=0, columnspan=3, sticky="w", pady=(0, 4))
+        test_input = tk.Text(frame, height=2, font=("Segoe UI", 10), wrap="word",
+                             relief="solid", borderwidth=1, padx=8, pady=6,
+                             highlightthickness=1, highlightbackground=BORDER,
+                             highlightcolor=ACCENT)
         test_input.insert("1.0", "i think this aplication is realy usful and i love it")
-        test_button = ttk.Button(frame, text="Run test", width=10)
+        test_input.grid(row=TEST_ROW + 1, column=0, columnspan=3, sticky="ew", pady=(0, 6))
+        test_button = ttk.Button(frame, text="Run test", width=12)
+        test_button.grid(row=TEST_ROW + 2, column=0, sticky="w")
         test_output = tk.Label(
-            frame, text="", justify="left", anchor="w", wraplength=500,
-            font=("Segoe UI", 9), fg="#1a4d1a", bg="#f0f9f0",
-            padx=8, pady=6, relief="solid", borderwidth=1,
+            frame, text="", justify="left", anchor="w", wraplength=520,
+            font=("Segoe UI", 9), fg="#166534", bg="#F0FDF4",
+            padx=10, pady=8, relief="flat", borderwidth=0,
         )
 
         def _run_test():
             text = test_input.get("1.0", "end").strip()
             if not text:
                 return
-            test_output.configure(text="Running…", fg="#666666", bg="#f5f5f5")
+            test_output.grid(row=TEST_ROW + 3, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+            test_output.configure(text="Running…", fg=MUTED, bg=PANEL)
 
             def _worker():
                 try:
@@ -284,11 +347,11 @@ class SettingsWindow:
                 def _show():
                     if result is None:
                         test_output.configure(
-                            text=f"Failed: {err or 'provider returned no result'}",
-                            fg="#b00020", bg="#fdf3f3",
+                            text=f"✕  Failed: {err or 'provider returned no result'}",
+                            fg="#991B1B", bg="#FEF2F2",
                         )
                     else:
-                        test_output.configure(text=result, fg="#1a4d1a", bg="#f0f9f0")
+                        test_output.configure(text=f"✓  {result}", fg="#166534", bg="#F0FDF4")
                 try:
                     self._window.after(0, _show)
                 except Exception:
@@ -299,19 +362,12 @@ class SettingsWindow:
 
         test_button.configure(command=_run_test)
 
-        # Hotkey + Save row indices live AFTER all dynamic provider rows.
-        TEST_ROW = PROV_ROW_BASE + 10
-        ttk.Separator(frame, orient="horizontal").grid(
-            row=TEST_ROW - 1, column=0, columnspan=3, sticky="ew", pady=8
-        )
-        test_label.grid(row=TEST_ROW, column=0, sticky="nw", pady=5)
-        test_input.grid(row=TEST_ROW, column=1, sticky="w", padx=(10, 0), pady=5)
-        test_button.grid(row=TEST_ROW, column=2, sticky="nw", padx=(6, 0), pady=5)
-        test_output.grid(row=TEST_ROW + 1, column=0, columnspan=3, sticky="ew", pady=(4, 0))
-
-        hotkey_label.grid(row=TEST_ROW + 2, column=0, sticky="w", pady=5)
-        hotkey_value.grid(row=TEST_ROW + 2, column=1, columnspan=2, sticky="w", padx=(10, 0), pady=5)
-        save_button.grid(row=TEST_ROW + 3, column=0, columnspan=3, pady=12)
+        # ----- Hotkeys hint -----
+        ttk.Label(
+            frame, text="Hotkeys & toolbar buttons: customize in the tray menu → "
+                        "“Shortcuts & Buttons”.",
+            style="Muted.TLabel", wraplength=540,
+        ).grid(row=TEST_ROW + 4, column=0, columnspan=3, sticky="w", pady=(14, 0))
 
         refresh_button.configure(command=_refresh_ollama_models)
         provider_combo.bind("<<ComboboxSelected>>", _update_provider_fields)
@@ -321,8 +377,7 @@ class SettingsWindow:
 
         def save():
             new_config = dict(self._config)
-            # Engine is always AI now; keep the key for backward-compat configs.
-            new_config["engine"] = "ai"
+            new_config["engine"] = "ai"  # always AI; kept for backward-compat
             key = _provider_key()
             model_name = _strip_model_marker(model_var.get()) if key == "ollama" else model_var.get()
             providers_data[key] = {
@@ -336,11 +391,11 @@ class SettingsWindow:
             self._window.destroy()
             self._window = None
 
-        save_button.configure(command=save)
-
         def on_close():
             self._window.destroy()
             self._window = None
 
+        save_button.configure(command=save)
+        cancel_button.configure(command=on_close)
         self._window.protocol("WM_DELETE_WINDOW", on_close)
         self._window.mainloop()
