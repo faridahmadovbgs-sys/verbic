@@ -203,6 +203,36 @@ def _get_virtual_screen_bounds():
         return None
 
 
+class _MONITORINFO(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wintypes.DWORD),
+        ("rcMonitor", wintypes.RECT),
+        ("rcWork", wintypes.RECT),
+        ("dwFlags", wintypes.DWORD),
+    ]
+
+
+def _get_monitor_rect_at(x, y):
+    """Return the WORK-AREA rect (left, top, right, bottom) of the monitor that
+    contains the point (x, y) — work area excludes the taskbar. Crucial for
+    multi-monitor setups so the popup stays on the screen the user is using and
+    above the taskbar. Returns None on failure."""
+    try:
+        MONITOR_DEFAULTTONEAREST = 2
+        pt = wintypes.POINT(int(x), int(y))
+        hmon = ctypes.windll.user32.MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST)
+        if not hmon:
+            return None
+        info = _MONITORINFO()
+        info.cbSize = ctypes.sizeof(_MONITORINFO)
+        if not ctypes.windll.user32.GetMonitorInfoW(hmon, ctypes.byref(info)):
+            return None
+        w = info.rcWork
+        return (w.left, w.top, w.right, w.bottom)
+    except Exception:
+        return None
+
+
 class SuggestionWindow:
     """Inline overlay shown near the caret. Does not steal focus.
 
@@ -233,12 +263,18 @@ class SuggestionWindow:
                     return True
         return False
 
-    def __init__(self, suggestion_text, on_click=None, on_dismiss=None, on_copy=None, header_label=None):
+    def __init__(self, suggestion_text, on_click=None, on_dismiss=None, on_copy=None,
+                 header_label=None, anchor=None):
         self._suggestion = suggestion_text
         self._on_click = on_click
         self._on_dismiss = on_dismiss
         self._on_copy = on_copy
         self._header_label = header_label or "Suggested edit"
+        # When set to (x, y), the overlay anchors there instead of hunting for
+        # the caret. Used by toolbar actions so the popup lands on the monitor
+        # the user is working on — caret-hunting fallbacks can place it on a
+        # different screen in multi-monitor setups (the "popup gets lost" bug).
+        self._anchor = anchor
         self._window = None
         self._closed = False
         self._click_fired = False
@@ -426,6 +462,19 @@ class SuggestionWindow:
         #      than the bottom-left of the foreground window when UIA flakes
         #      (notably Chrome's Google homepage and most webmail).
         #   5. Foreground-window bottom-left and (100,100) as last resort.
+        #
+        # When an explicit anchor is given (toolbar actions), use it directly —
+        # it's the point the user just acted on, so the popup lands on the same
+        # monitor (caret-hunting can otherwise drop it on another screen).
+        if self._anchor:
+            x, y = self._anchor[0] + 12, self._anchor[1] + 16
+        else:
+            x, y = self._anchor_from_caret()
+
+        # Clamp to the full virtual screen across all monitors.
+        self._apply_position(x, y)
+
+    def _anchor_from_caret(self):
         pos = _get_caret_screen_pos()
         if pos:
             x, y = pos[0] + 8, pos[1] + 18
@@ -455,15 +504,24 @@ class SuggestionWindow:
                             x, y = left + 40, top + 80
                         else:
                             x, y = 100, 100
+        return x, y
 
-        # Clamp to the full virtual screen across all monitors.
-        bounds = _get_virtual_screen_bounds()
-        if bounds:
-            vx, vy, vw, vh = bounds
+    def _apply_position(self, x, y):
+        # Clamp to the monitor that contains (x, y) so the popup stays fully on
+        # the screen the user is working on, then fall back to the full virtual
+        # screen if the per-monitor lookup fails.
+        rect = _get_monitor_rect_at(x, y)
+        if rect:
+            vx, vy, vr, vb = rect
+            vw, vh = vr - vx, vb - vy
         else:
-            vx, vy = 0, 0
-            vw = self._window.winfo_screenwidth()
-            vh = self._window.winfo_screenheight()
+            bounds = _get_virtual_screen_bounds()
+            if bounds:
+                vx, vy, vw, vh = bounds
+            else:
+                vx, vy = 0, 0
+                vw = self._window.winfo_screenwidth()
+                vh = self._window.winfo_screenheight()
 
         win_w = max(self._window.winfo_reqwidth(), 60)
         win_h = max(self._window.winfo_reqheight(), 30)

@@ -358,7 +358,8 @@ class GrammarTrayApp:
             stripped = "…" + tail
         return stripped or None
 
-    def _show_suggestion(self, corrected, char_count, is_insert=False, paste_selection=False, header=None):
+    def _show_suggestion(self, corrected, char_count, is_insert=False, paste_selection=False,
+                         header=None, anchor=None):
         existing = self._suggestion_window
         if existing is not None:
             try:
@@ -372,6 +373,7 @@ class GrammarTrayApp:
             on_dismiss=self._on_overlay_dismiss,
             on_copy=self._on_overlay_copy,
             header_label=header or self._active_mode_label(),
+            anchor=anchor,
         )
         self._suggestion_window = overlay
         self._pending_corrected = corrected
@@ -961,11 +963,12 @@ class GrammarTrayApp:
         t.join(timeout)
         return result["val"]
 
-    def _selection_toolbar_buttons(self, selection):
+    def _selection_toolbar_buttons(self, selection, anchor=None):
         """Build the (label, callback) list for the floating toolbar. Each
         action uses the text captured when the toolbar was shown (`selection`)
-        so it doesn't re-copy at click time. Callbacks spawn a worker thread so
-        the Tk click handler returns immediately."""
+        so it doesn't re-copy at click time, and `anchor` (the toolbar's screen
+        position) so the result popup lands on the same monitor. Callbacks spawn
+        a worker thread so the Tk click handler returns immediately."""
         labels = {key: label for key, label in TOOLBAR_ACTIONS}
         # Surface the active tone on the Fix button so it's clear it reformats
         # in the configured tone (e.g. "✓ Fix · Professional").
@@ -975,8 +978,8 @@ class GrammarTrayApp:
             labels["fix_grammar"] = f"✓ Fix · {active_tone}"
         handlers = {
             "set_context": lambda: self._capture_context_from_selection(selection),
-            "draft_answer": lambda: self._draft_answer(selection),
-            "fix_grammar": lambda: self._fix_selection(selection),
+            "draft_answer": lambda: self._draft_answer(selection, anchor=anchor),
+            "fix_grammar": lambda: self._fix_selection(selection, anchor=anchor),
         }
         buttons = []
         for key, _label in TOOLBAR_ACTIONS:
@@ -994,7 +997,7 @@ class GrammarTrayApp:
     def _show_selection_button(self, x, y, selection):
         self._close_selection_button()
 
-        buttons = self._selection_toolbar_buttons(selection)
+        buttons = self._selection_toolbar_buttons(selection, anchor=(x, y))
         if not buttons:
             return
 
@@ -1032,7 +1035,7 @@ class GrammarTrayApp:
         """Ctrl+Alt+A — draft a full answer using the current context."""
         threading.Thread(target=self._draft_answer, daemon=True).start()
 
-    def _draft_answer(self, selection=None):
+    def _draft_answer(self, selection=None, anchor=None):
         # The "question" to answer: the toolbar passes a pre-captured selection;
         # otherwise prefer a live selection, then the pinned writing context,
         # then whatever the user has typed so far.
@@ -1056,7 +1059,7 @@ class GrammarTrayApp:
         # Speculation mode may have pre-drafted this exact question already.
         if self._speculative_answer and self._speculative_answer_for == question:
             _dlog("tray", "speculation: using pre-drafted answer")
-            self._show_suggestion(self._speculative_answer, 0, is_insert=True, header="Draft answer")
+            self._show_suggestion(self._speculative_answer, 0, is_insert=True, header="Draft answer", anchor=anchor)
             return
 
         prompt = self.prompt_builder.build_answer(question, writing_context=self._writing_context or None)
@@ -1066,9 +1069,9 @@ class GrammarTrayApp:
             return
         # Insert mode: there's no typed text to replace, so char_count=0 and
         # accepting pastes the answer at the caret.
-        self._show_suggestion(answer.strip(), 0, is_insert=True, header="Draft answer")
+        self._show_suggestion(answer.strip(), 0, is_insert=True, header="Draft answer", anchor=anchor)
 
-    def _fix_selection(self, selection=None):
+    def _fix_selection(self, selection=None, anchor=None):
         """Toolbar 'Fix' action — correct the selection and show the result;
         accepting pastes it over the still-selected text. `selection` is
         pre-captured by the toolbar; None means capture live."""
@@ -1089,7 +1092,7 @@ class GrammarTrayApp:
         if not self._looks_like_valid_correction(selected, corrected):
             self._notify("Verbic", "The model returned an unusable response.")
             return
-        self._show_suggestion(corrected.strip(), 0, paste_selection=True)
+        self._show_suggestion(corrected.strip(), 0, paste_selection=True, anchor=anchor)
 
     def _context_menu_label(self, item):
         if self._writing_context:
