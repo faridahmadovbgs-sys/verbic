@@ -903,19 +903,20 @@ class GrammarTrayApp:
         # source app still has focus and the selection is live. Capturing later
         # (when a toolbar button is clicked) raced with the toolbar window /
         # focus and frequently came back empty, so Answer/Fix did nothing.
-        # The captured text is also what decides whether to show the toolbar:
-        # no text selected → nothing to act on → don't show.
         if kind == "click":
             # A double/triple-click also lands on icons / buttons / list items.
-            # Only probe (synth Ctrl+C) when UIA suggests a real text selection,
-            # so we don't copy on every click.
+            # Only show the toolbar when UIA confirms a real text selection, so
+            # it doesn't pop on every click.
             if self._focused_has_selection() is not True:
                 return
         selection = self._get_selected_text()
-        if not selection or not selection.strip():
-            _dlog("tray", f"toolbar: no selection captured ({kind})")
-            return
-        self._show_selection_button(x, y, selection.strip())
+        # Show the toolbar even if the capture came back empty — the user made a
+        # deliberate drag and expects the toolbar. The actions will re-capture
+        # live at click time if needed. (Gating the toolbar on capture success
+        # meant a single flaky Ctrl+C hid the toolbar entirely.)
+        sel = selection.strip() if (selection and selection.strip()) else None
+        _dlog("tray", f"toolbar: show ({kind}) captured={'yes' if sel else 'no'}")
+        self._show_selection_button(x, y, sel)
 
     def _focused_has_selection(self, timeout=0.6):
         """Return True/False if UI Automation can tell whether the focused
