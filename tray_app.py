@@ -592,19 +592,23 @@ class GrammarTrayApp:
             return None
 
     def _get_selected_text(self):
-        """Copy whatever is selected in the focused field and return it.
+        """Return the selected text. Tries UI Automation first (no clipboard
+        side effects); only if that can't read it does it fall back to a
+        synthetic Ctrl+C.
 
-        Uses a sentinel to detect whether Ctrl+C actually copied something:
-        the clipboard is overwritten with a unique marker *before* Ctrl+C, so
-        a real copy leaves the selection on the clipboard while a no-op copy
-        (nothing selected) leaves the marker untouched. This is what lets the
-        user fix the *same* text repeatedly — the old "did the clipboard
-        change?" check failed there (the text was already on the clipboard
-        from the previous fix) and wrongly reported "no selection".
+        This is for DELIBERATE actions (a toolbar button click, Ctrl+Alt+X/A,
+        Ctrl+Shift+G) — never on plain selection — so the rare clipboard
+        fallback can't interfere with the user's normal copy/paste.
 
-        The user's original clipboard is restored afterward so we don't
-        clobber it.
+        The Ctrl+C path uses a sentinel to detect whether the copy actually
+        happened (so re-fixing the same text works) and restores the user's
+        original clipboard afterward.
         """
+        # Prefer UIA — zero clipboard impact.
+        uia_text = self._get_selection_text_uia()
+        if uia_text and uia_text.strip():
+            return uia_text
+
         import time
         try:
             from pynput.keyboard import Controller, Key
@@ -921,32 +925,37 @@ class GrammarTrayApp:
         threading.Thread(target=self._maybe_show_toolbar, args=(x, y, kind), daemon=True).start()
 
     def _maybe_show_toolbar(self, x, y, kind):
-        # Capture the selected text NOW — right after the gesture, while the
-        # source app still has focus and the selection is live. Capturing later
-        # (when a toolbar button is clicked) raced with the toolbar window /
-        # focus and frequently came back empty, so Answer/Fix did nothing.
-        selection = self._get_selected_text()
+        # Read the selection via UI Automation only — NO clipboard. Capturing
+        # via a synthetic Ctrl+C on every selection hammered the Windows
+        # clipboard and broke the user's own copy/paste (contention + the
+        # restore step clobbering a fresh copy). UIA reads the selected text
+        # without touching the clipboard at all.
+        selection = self._get_selection_text_uia()
         sel = selection.strip() if (selection and selection.strip()) else None
 
-        # The capture result IS the gate for a double/triple-click: a click that
-        # selected a word/line gives text → show; a click on an app icon /
-        # button gives nothing → don't show. (We used to gate clicks on a UIA
-        # selection check, but UIA reports an empty selection in many apps even
-        # when a word IS selected, which broke double-click-to-highlight.)
+        # For a double/triple-click, UIA text is the gate: a word/line selection
+        # gives text → show; a click on an icon/button gives nothing → skip.
         if kind == "click" and not sel:
-            _dlog("tray", "toolbar: click with no selection — skip")
             return
 
-        # A drag is a deliberate text gesture, so show the toolbar even if the
-        # capture came back empty; the actions re-capture live at click time.
-        _dlog("tray", f"toolbar: show ({kind}) captured={'yes' if sel else 'no'}")
+        # A drag is a deliberate text gesture. If UIA couldn't read the text
+        # (some apps expose no TextPattern), still show the toolbar — the action
+        # will capture via the clipboard at click time, which is a single,
+        # deliberate event, NOT something that fires on every selection.
+        _dlog("tray", f"toolbar: show ({kind}) uia={'yes' if sel else 'no'}")
         self._show_selection_button(x, y, sel)
 
-    def _focused_has_selection(self, timeout=0.6):
-        """Return True/False if UI Automation can tell whether the focused
-        control has a non-empty text selection, or None if it can't (no
-        TextPattern). No clipboard side effects."""
-        result = {"val": None}
+    def _get_selection_text_uia(self, timeout=0.6):
+        """Return the focused control's selected text via UI Automation, or None
+        if there's no selection / UIA can't read it.
+
+        CRUCIAL: this has NO clipboard side effects. It's what keeps the floating
+        toolbar from hammering the Windows clipboard on every text selection —
+        the old path injected a synthetic Ctrl+C (plus a save/sentinel/restore
+        cycle) on every drag and double-click, which contended with and clobbered
+        the user's own copy/paste, effectively breaking the clipboard while
+        Verbic was running."""
+        result = {"text": None}
 
         def worker():
             try:
@@ -965,28 +974,28 @@ class GrammarTrayApp:
                     except Exception:
                         continue
                 if tp is None:
-                    return  # can't tell — leave result as None
+                    return  # no text pattern — caller falls back if needed
                 try:
                     sels = tp.GetSelection()
                 except Exception:
                     return
                 if not sels:
-                    result["val"] = False
                     return
                 text = ""
                 for r in sels:
                     try:
-                        text += r.GetText(200) or ""
+                        text += r.GetText(-1) or ""
                     except Exception:
                         pass
-                result["val"] = bool(text.strip())
+                if text.strip():
+                    result["text"] = text
             except Exception:
                 return
 
         t = threading.Thread(target=worker, daemon=True)
         t.start()
         t.join(timeout)
-        return result["val"]
+        return result["text"]
 
     def _selection_toolbar_buttons(self, selection, anchor=None):
         """Build the (label, callback) list for the floating toolbar. Each
