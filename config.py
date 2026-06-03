@@ -101,6 +101,7 @@ TONES = [
     ("empathetic", "Empathetic", "Rewrite in a kind, empathetic, understanding tone."),
     ("academic", "Academic", "Rewrite in a precise, scholarly, academic tone."),
     ("playful", "Playful", "Rewrite in a fun, playful, lighthearted tone."),
+    ("redneck", "Redneck / Hillbilly", "Rewrite in a folksy Southern redneck/hillbilly dialect — relaxed grammar, drawl spellings (e.g. 'gonna', 'ain't', 'y'all', 'fixin' to', 'reckon', 'dadgum'), and homespun country phrasing — while keeping the original meaning clear."),
 ]
 TONE_KEYS = [key for key, _label, _prompt in TONES]
 TONE_PROMPTS = {key: prompt for key, _label, prompt in TONES}
