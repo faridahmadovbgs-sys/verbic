@@ -17,7 +17,7 @@ from settings_window import SettingsWindow
 from shortcuts_window import ShortcutsWindow
 from config import (
     load_config, save_config, PROVIDERS, DEFAULT_OPTIONS, ENGINES,
-    DEFAULT_ENGINE, TONES, TONE_KEYS, TOOLBAR_ACTIONS,
+    DEFAULT_ENGINE, TONES, ACCENTS, TONE_KEYS, TONE_LABELS, TOOLBAR_ACTIONS,
 )
 from welcome_window import WelcomeWindow
 from text_reader import read_focused_text
@@ -518,7 +518,7 @@ class GrammarTrayApp:
         parts = []
         if self.options.get("grammar"):
             parts.append("Grammar")
-        tone_names = {key: label for key, label, _prompt in TONES}
+        tone_names = TONE_LABELS
         for key in TONE_KEYS:
             if self.options.get(key):
                 parts.append(tone_names.get(key, key.title()))
@@ -997,7 +997,7 @@ class GrammarTrayApp:
         labels = {key: label for key, label in TOOLBAR_ACTIONS}
         # Surface the active tone on the Fix button so it's clear it reformats
         # in the configured tone (e.g. "✓ Fix · Professional").
-        tone_names = {key: label for key, label, _prompt in TONES}
+        tone_names = TONE_LABELS
         active_tone = next((tone_names[k] for k in TONE_KEYS if self.options.get(k)), None)
         if active_tone:
             labels["fix_grammar"] = f"✓ Fix · {active_tone}"
@@ -1213,12 +1213,19 @@ class GrammarTrayApp:
         icon_path = os.path.join(base_path, "icon.png")
         image = Image.open(icon_path)
 
-        # All tones live in one submenu so the tray stays compact even with the
-        # expanded set. They're mutually exclusive (handled in _toggle_option).
+        # Writing-style tones and dialect/accent tones get their own submenus so
+        # the tray stays compact. All of them are mutually exclusive with each
+        # other (handled in _toggle_option via TONE_KEYS).
         tone_submenu = pystray.Menu(
             *[
                 pystray.MenuItem(label, self._toggle_option(key), checked=self._is_checked(key))
                 for key, label, _prompt in TONES
+            ]
+        )
+        accents_submenu = pystray.Menu(
+            *[
+                pystray.MenuItem(label, self._toggle_option(key), checked=self._is_checked(key))
+                for key, label, _prompt in ACCENTS
             ]
         )
 
@@ -1231,6 +1238,7 @@ class GrammarTrayApp:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Fix Grammar", self._toggle_option("grammar"), checked=self._is_checked("grammar")),
             pystray.MenuItem("Tone", tone_submenu),
+            pystray.MenuItem("Accents", accents_submenu),
             pystray.MenuItem("Expand", self._toggle_option("expand"), checked=self._is_checked("expand")),
             pystray.MenuItem("Auto Suggest (typing)", self._toggle_option("auto_suggest"), checked=self._is_checked("auto_suggest")),
             pystray.MenuItem("Predictive (Flow) Mode", self._toggle_option("speculation"), checked=self._is_checked("speculation")),

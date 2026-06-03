@@ -90,6 +90,7 @@ def _legacy_config_path():
 # mutually exclusive with each other; "grammar" and "expand" are independent
 # options. Each tone maps to a one-line instruction injected into the AI prompt
 # (see prompt_builder + TONE_PROMPTS below).
+# Writing-style tones (the "Tone" tray submenu).
 TONES = [
     ("formal", "Formal", "Rewrite in a formal, professional tone."),
     ("casual", "Casual", "Rewrite in a casual, friendly, conversational tone."),
@@ -101,10 +102,39 @@ TONES = [
     ("empathetic", "Empathetic", "Rewrite in a kind, empathetic, understanding tone."),
     ("academic", "Academic", "Rewrite in a precise, scholarly, academic tone."),
     ("playful", "Playful", "Rewrite in a fun, playful, lighthearted tone."),
-    ("redneck", "Redneck / Hillbilly", "Rewrite in a folksy Southern redneck/hillbilly dialect — relaxed grammar, drawl spellings (e.g. 'gonna', 'ain't', 'y'all', 'fixin' to', 'reckon', 'dadgum'), and homespun country phrasing — while keeping the original meaning clear."),
 ]
-TONE_KEYS = [key for key, _label, _prompt in TONES]
-TONE_PROMPTS = {key: prompt for key, _label, prompt in TONES}
+
+# Dialect / accent tones (the "Accents" tray submenu). Same mechanism as TONES —
+# mutually exclusive with each other AND with the style tones. Prompts keep the
+# original meaning clear and stay affectionate / good-natured.
+ACCENTS = [
+    ("redneck", "Redneck / Hillbilly", "Rewrite in a folksy Southern redneck/hillbilly dialect — relaxed grammar and drawl spellings ('gonna', 'ain't', 'y'all', 'fixin' to', 'reckon', 'dadgum') — keeping the meaning clear."),
+    ("british", "British (Posh)", "Rewrite in a posh British / Received-Pronunciation style — refined phrasings like 'rather', 'quite', 'shall', 'old chap', 'jolly good', 'brilliant' — keeping the meaning clear."),
+    ("cockney", "Cockney", "Rewrite in a London Cockney working-class style — dropped h's and slang like 'guv', 'blimey', 'innit', 'nippin'', 'jiffy', 'mate' — keeping the meaning clear."),
+    ("scottish", "Scottish", "Rewrite in a Scottish dialect — 'aye', 'wee', 'cannae', 'dinnae', 'ken', 'away tae', 'bonnie' — keeping the meaning clear."),
+    ("irish", "Irish", "Rewrite in an Irish English style — 'grand', 'sure', 'to be sure', 'no bother', 'gas', 'yer man' — keeping the meaning clear."),
+    ("aussie", "Australian", "Rewrite in casual Australian slang — 'mate', 'no worries', 'heaps', 'arvo', 'reckon', 'in a tick', 'bloody' — keeping the meaning clear."),
+    ("cowboy", "Texan / Cowboy", "Rewrite in a Texan cowboy drawl — 'howdy', 'partner', 'fixin' to', 'reckon', 'mosey', 'much obliged', 'y'all' — keeping the meaning clear."),
+    ("pirate", "Pirate", "Rewrite in stereotypical pirate speak — 'arr', 'matey', 'ye', 'ahoy', 'aye', 'shiver me timbers', nautical phrasing — keeping the meaning clear."),
+    ("surfer", "Surfer / SoCal", "Rewrite in laid-back surfer / SoCal slang — 'dude', 'gnarly', 'stoked', 'totally', 'rad', 'brah' — keeping the meaning clear."),
+    ("valley", "Valley Girl", "Rewrite in Valley Girl style — 'like', 'totally', 'oh my god', 'as if', 'literally', uptalk phrasing — keeping the meaning clear."),
+    ("boston", "Boston", "Rewrite in a Boston accent style — dropped r's ('pahk the cah', 'wickid'), 'wicked' as an intensifier, 'kid' — keeping the meaning clear."),
+    ("canadian", "Canadian", "Rewrite in a friendly stereotypical Canadian style — 'eh', 'sorry', 'beauty', 'for sure', 'hoser', polite phrasing — keeping the meaning clear."),
+    ("minnesotan", "Minnesotan (Fargo)", "Rewrite in upper-Midwest 'Minnesota nice' style — 'oh geez', 'ya betcha', 'don'tcha know', 'uff da', 'oh fer cute' — keeping the meaning clear."),
+    ("shakespearean", "Shakespearean", "Rewrite in Early Modern English Shakespearean style — 'thee', 'thou', 'thy', 'hath', 'doth', 'prithee', 'hark', 'forsooth' — keeping the meaning clear."),
+    ("genz", "Gen Z", "Rewrite in Gen Z internet slang — 'no cap', 'fr', 'lowkey', 'rizz', 'bet', 'rn', 'it's giving' — keeping the meaning clear."),
+    ("newyorker", "New Yorker", "Rewrite in a brash New York City style — 'fuhgeddaboudit', 'ya', 'over here', 'I'm walkin' here', direct and fast-talking — keeping the meaning clear."),
+    ("mobster", "Mobster", "Rewrite in a good-natured wise-guy Italian-American mobster style — 'capisce', 'fuhgeddaboudit', 'badda bing', 'wise guy' — affectionate, keeping the meaning clear."),
+    ("belle", "Southern Belle", "Rewrite in a gracious Southern belle style — 'darlin'', 'bless your heart', 'I do declare', 'y'all', sweet and genteel — keeping the meaning clear."),
+    ("jamaican", "Jamaican", "Rewrite in a light, good-natured Jamaican Patois-influenced style — 'irie', 'ya mon', 'soon come', 'respect', 'bredren' — keeping the meaning clear."),
+]
+
+# Combined view for everything that treats tones uniformly: mutual exclusion,
+# prompt injection (prompt_builder), and the per-toggle config defaults.
+_ALL_TONES = TONES + ACCENTS
+TONE_KEYS = [key for key, _label, _prompt in _ALL_TONES]
+TONE_PROMPTS = {key: prompt for key, _label, prompt in _ALL_TONES}
+TONE_LABELS = {key: label for key, label, _prompt in _ALL_TONES}
 
 
 DEFAULT_OPTIONS = {

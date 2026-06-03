@@ -7,7 +7,7 @@ whole replies from context you give it, and can even predict how you'd finish a
 sentence. Everything surfaces as a suggestion you explicitly accept — Verbic
 never silently rewrites your words.
 
-Published by **Sand Castle LLC**. Current version: **1.2.4**.
+Published by **Sand Castle LLC**. Current version: **1.2.5**.
 
 > ### 🔑 You need an AI provider before Verbic can do anything
 > Verbic doesn't ship with its own AI — it connects to one you choose. Pick one:
@@ -54,7 +54,9 @@ Published by **Sand Castle LLC**. Current version: **1.2.4**.
   corrected version near your caret. **Apply** it (Ctrl+Space), **Copy** it to
   the clipboard, or **Dismiss** it.
 - **Tone rewrites** — formal, casual, professional, friendly, confident,
-  concise, persuasive, empathetic, academic, playful, or redneck/hillbilly.
+  concise, persuasive, empathetic, academic, or playful — plus 19 **accent/
+  dialect** tones (British, Aussie, Scottish, Irish, Texan/cowboy, pirate,
+  surfer, Shakespearean, redneck, and more).
 - **Expand** — elaborate a terse note into something fuller.
 - **Writing context** — pin a question, email, or topic so every suggestion is
   shaped to what you're actually responding to.
@@ -128,7 +130,8 @@ Right-click the tray icon:
 
 - **Pause / Resume corrections** — disable everything without quitting
 - **Fix Grammar** — spelling, punctuation, grammar (on by default)
-- **Tone** — submenu of 11 mutually-exclusive tone rewrites
+- **Tone** / **Accents** — two submenus of mutually-exclusive rewrites (10
+  writing styles + 19 accents/dialects)
 - **Expand** — elaborate the text
 - **Auto Suggest (typing)** — inline overlay while you type
 - **Predictive (Flow) Mode** — sentence prediction + eager answer pre-draft
