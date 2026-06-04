@@ -5,7 +5,7 @@
 ; installed the previous "Grammar Tool" name upgrade cleanly to Verbic.
 
 #define MyAppName       "Verbic"
-#define MyAppVersion    "1.3.1"
+#define MyAppVersion    "1.3.2"
 #define MyAppPublisher  "Sand Castle LLC"
 #define MyAppExeName    "Verbic.exe"
 #define MyAppId         "{{2A8E1B4F-7B3C-4C26-9D1E-9F3F2C7B0A61}}"
@@ -69,6 +69,13 @@ Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: no
 
 [UninstallRun]
 Filename: "taskkill.exe"; Parameters: "/F /IM {#MyAppExeName}"; Flags: runhidden; RunOnceId: "KillGrammarTool"
+
+[UninstallDelete]
+; A full uninstall wipes the user's Verbic settings (config.json holds the API
+; key + the setup_complete flag, plus logs). This makes a later reinstall a true
+; clean install that re-triggers the mandatory first-run setup. In-place UPDATES
+; run over the existing install without uninstalling, so they keep the config.
+Type: filesandordirs; Name: "{userappdata}\Verbic"
 
 [Code]
 function InitializeSetup(): Boolean;
