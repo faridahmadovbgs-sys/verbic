@@ -1178,17 +1178,23 @@ class GrammarTrayApp:
         WelcomeWindow(DEFAULT_ENGINE, _on_done).open()
 
     def _is_provider_configured(self):
-        """True if the saved config already names a usable provider (an API key
-        for key-based providers, or at least a model for Ollama/custom)."""
+        """True only if the saved config carries a real, user-entered API key.
+
+        This is the migration check that spares EXISTING cloud users (upgrading
+        from a pre-1.3.0 build) a forced re-verify. A default Ollama config — which
+        every fresh install ships with (provider=ollama + a default model name) —
+        must NOT count as configured, or new users would skip the mandatory setup
+        gate entirely. Ollama/custom users go through setup once so the connection
+        is actually verified (the default model may not even be installed)."""
         cfg = self._config
         prov = cfg.get("provider")
         if not prov:
             return False
-        pc = (cfg.get("providers", {}) or {}).get(prov, {}) or {}
         info = PROVIDERS.get(prov, {})
-        if info.get("needs_api_key"):
-            return bool((pc.get("api_key") or "").strip())
-        return bool((pc.get("model") or "").strip())
+        if not info.get("needs_api_key"):
+            return False
+        pc = (cfg.get("providers", {}) or {}).get(prov, {}) or {}
+        return bool((pc.get("api_key") or "").strip())
 
     def _ensure_provider_setup(self):
         """Mandatory first-run gate. Returns True if the app may start.
