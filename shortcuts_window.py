@@ -1,4 +1,5 @@
-"""Shortcuts & Buttons window — rebind hotkeys and pick floating-toolbar buttons.
+"""Shortcuts & Buttons — rendered as an embeddable panel inside the unified
+Verbic window (see main_window.py).
 
 Hotkey capture reads the Windows virtual-key code straight from the Tk event
 (event.keycode == VK on Windows) and the live modifier state via
@@ -7,8 +8,11 @@ later detects it.
 """
 import ctypes
 import tkinter as tk
-from tkinter import ttk
 
+from theme import (
+    SURFACE, SURFACE_2, SURFACE_3, BORDER, BORDER_HI, TEXT, MUTED, SECTION,
+    ACCENT, GOOD, FONT, PillButton, ToggleSwitch,
+)
 from config import HOTKEY_ACTIONS, TOOLBAR_ACTIONS, DEFAULT_HOTKEYS
 
 
@@ -16,7 +20,6 @@ _VK_CONTROL = 0x11
 _VK_SHIFT = 0x10
 _VK_ALT = 0x12
 
-# Keysyms that are pure modifiers — ignored as a hotkey's "main" key.
 _MODIFIER_KEYSYMS = {
     "Control_L", "Control_R", "Shift_L", "Shift_R", "Alt_L", "Alt_R",
     "Super_L", "Super_R", "Win_L", "Win_R", "Caps_Lock", "Num_Lock",
@@ -51,135 +54,112 @@ def format_binding(binding):
     return "+".join(parts)
 
 
-class ShortcutsWindow:
-    def __init__(self, config, on_save):
+class ShortcutsPanel:
+    """Builds the hotkeys + toolbar-buttons UI into `parent` (bg=SURFACE).
+    `toplevel` is the window that receives key events during capture.
+    `on_save(new_config)` is called on Save."""
+
+    def __init__(self, parent, toplevel, config, on_save):
+        self._parent = parent
+        self._toplevel = toplevel
         self._config = config
         self._on_save = on_save
-        self._window = None
         self._capturing_action = None
-        # Working copies edited in the UI; committed to config on Save.
         self._hotkeys = {
             action: dict(self._config.get("hotkeys", {}).get(action, DEFAULT_HOTKEYS[action]))
             for action, _label in HOTKEY_ACTIONS
         }
         self._binding_buttons = {}
-        self._toolbar_vars = {}
-        self._show_toolbar_var = None
+        self._toolbar_switches = {}
+        self._show_toolbar = None
+        self._saved_note = None
+        self._build()
+        toplevel.bind("<KeyPress>", self._on_key, add="+")
 
-    def open(self):
-        if self._window is not None:
-            self._window.lift()
-            return
+    def set_config(self, config):
+        self._config = config
 
-        self._window = tk.Tk()
-        self._window.title("Verbic — Shortcuts & Buttons")
-        self._window.geometry("460x520")
-        self._window.resizable(False, False)
-        try:
-            self._window.attributes("-topmost", True)
-            self._window.update_idletasks()
-            self._window.attributes("-topmost", False)
-            self._window.lift()
-            self._window.focus_force()
-        except Exception:
-            pass
+    def _build(self):
+        p = self._parent
 
-        pad = ttk.Frame(self._window, padding=18)
-        pad.pack(fill="both", expand=True)
+        tk.Label(p, text="KEYBOARD SHORTCUTS", bg=SURFACE, fg=SECTION,
+                 font=(FONT, 8, "bold")).pack(anchor="w")
+        tk.Label(p, text="Click a shortcut, then press the key combination you want.",
+                 bg=SURFACE, fg=MUTED, font=(FONT, 9)).pack(anchor="w", pady=(0, 10))
 
-        # ----- Keyboard shortcuts -----
-        tk.Label(pad, text="Keyboard shortcuts", font=("Segoe UI", 11, "bold")).pack(anchor="w")
-        tk.Label(
-            pad,
-            text="Click a shortcut, then press the key combination you want.",
-            font=("Segoe UI", 8), fg="#777",
-        ).pack(anchor="w", pady=(0, 8))
-
-        keys_frame = ttk.Frame(pad)
-        keys_frame.pack(fill="x")
+        keys = tk.Frame(p, bg=SURFACE)
+        keys.pack(fill="x")
+        keys.columnconfigure(0, weight=1)
         for row, (action, label) in enumerate(HOTKEY_ACTIONS):
-            tk.Label(keys_frame, text=label, font=("Segoe UI", 9), width=26, anchor="w").grid(
-                row=row, column=0, sticky="w", pady=4
-            )
-            btn = tk.Button(
-                keys_frame,
-                text=format_binding(self._hotkeys[action]),
-                width=18,
-                font=("Segoe UI", 9),
-                relief="groove",
-                command=lambda a=action: self._start_capture(a),
-            )
-            btn.grid(row=row, column=1, sticky="w", padx=(10, 0), pady=4)
+            tk.Label(keys, text=label, bg=SURFACE, fg=TEXT, font=(FONT, 10),
+                     anchor="w").grid(row=row, column=0, sticky="w", pady=5)
+            btn = _KeyButton(keys, format_binding(self._hotkeys[action]),
+                             command=lambda a=action: self._start_capture(a))
+            btn.grid(row=row, column=1, sticky="e", padx=(10, 0), pady=5)
             self._binding_buttons[action] = btn
 
-        ttk.Separator(pad, orient="horizontal").pack(fill="x", pady=14)
+        tk.Frame(p, bg=BORDER, height=1).pack(fill="x", pady=16)
 
-        # ----- Floating toolbar -----
-        tk.Label(pad, text="Selection toolbar", font=("Segoe UI", 11, "bold")).pack(anchor="w")
-        tk.Label(
-            pad,
-            text="Buttons that appear next to text you highlight with the mouse.",
-            font=("Segoe UI", 8), fg="#777",
-        ).pack(anchor="w", pady=(0, 8))
+        tk.Label(p, text="SELECTION TOOLBAR", bg=SURFACE, fg=SECTION,
+                 font=(FONT, 8, "bold")).pack(anchor="w")
+        tk.Label(p, text="Buttons that appear next to text you highlight with the mouse.",
+                 bg=SURFACE, fg=MUTED, font=(FONT, 9)).pack(anchor="w", pady=(0, 10))
 
-        self._show_toolbar_var = tk.BooleanVar(value=self._config.get("selection_button", True))
-        ttk.Checkbutton(
-            pad, text="Show toolbar when I select text",
-            variable=self._show_toolbar_var, command=self._sync_toolbar_enabled,
-        ).pack(anchor="w", pady=(0, 6))
+        srow = tk.Frame(p, bg=SURFACE)
+        srow.pack(fill="x", pady=(0, 4))
+        tk.Label(srow, text="Show toolbar when I select text", bg=SURFACE, fg=TEXT,
+                 font=(FONT, 10)).pack(side="left")
+        self._show_toolbar = ToggleSwitch(srow, value=self._config.get("selection_button", True),
+                                          bg=SURFACE, command=lambda _v: self._sync_toolbar_enabled())
+        self._show_toolbar.pack(side="right")
 
-        tb_frame = ttk.Frame(pad)
-        tb_frame.pack(fill="x", padx=(18, 0))
+        self._tb_frame = tk.Frame(p, bg=SURFACE)
+        self._tb_frame.pack(fill="x", padx=(14, 0), pady=(4, 0))
         saved_toolbar = self._config.get("toolbar", {})
         for action, label in TOOLBAR_ACTIONS:
-            var = tk.BooleanVar(value=bool(saved_toolbar.get(action, False)))
-            self._toolbar_vars[action] = var
-            ttk.Checkbutton(tb_frame, text=label, variable=var).pack(anchor="w", pady=2)
-        self._toolbar_checkbuttons = tb_frame
+            r = tk.Frame(self._tb_frame, bg=SURFACE)
+            r.pack(fill="x", pady=3)
+            lbl = tk.Label(r, text=label, bg=SURFACE, fg=TEXT, font=(FONT, 10))
+            lbl.pack(side="left")
+            sw = ToggleSwitch(r, value=bool(saved_toolbar.get(action, False)), bg=SURFACE)
+            sw.pack(side="right")
+            self._toolbar_switches[action] = (sw, lbl)
         self._sync_toolbar_enabled()
 
-        # ----- Buttons -----
-        btn_row = ttk.Frame(pad)
-        btn_row.pack(side="bottom", fill="x", pady=(16, 0))
-        ttk.Button(btn_row, text="Restore defaults", command=self._restore_defaults).pack(side="left")
-        ttk.Button(btn_row, text="Save", command=self._save).pack(side="right")
-        ttk.Button(btn_row, text="Cancel", command=self._close).pack(side="right", padx=(0, 8))
-
-        self._window.bind("<KeyPress>", self._on_key)
-        self._window.protocol("WM_DELETE_WINDOW", self._close)
-        self._window.mainloop()
+        actions = tk.Frame(p, bg=SURFACE)
+        actions.pack(fill="x", pady=(20, 0))
+        PillButton(actions, "Restore defaults", kind="ghost", bg=SURFACE, height=32,
+                   font_size=9).pack(side="left")
+        save = PillButton(actions, "Save shortcuts", kind="accent", bg=SURFACE, height=32)
+        save._command = self._save
+        save.pack(side="right")
+        self._saved_note = tk.Label(actions, text="", bg=SURFACE, fg=GOOD, font=(FONT, 9, "bold"))
+        self._saved_note.pack(side="right", padx=(0, 10))
+        actions.winfo_children()[0]._command = self._restore_defaults
 
     def _sync_toolbar_enabled(self):
-        state = "normal" if self._show_toolbar_var.get() else "disabled"
-        try:
-            for child in self._toolbar_checkbuttons.winfo_children():
-                child.configure(state=state)
-        except Exception:
-            pass
+        on = self._show_toolbar.get()
+        for sw, lbl in self._toolbar_switches.values():
+            lbl.configure(fg=TEXT if on else MUTED)
 
     def _start_capture(self, action):
-        # Cancel any in-progress capture first (restore its label).
         if self._capturing_action and self._capturing_action != action:
-            self._binding_buttons[self._capturing_action].configure(
-                text=format_binding(self._hotkeys[self._capturing_action])
-            )
+            self._binding_buttons[self._capturing_action].set_text(
+                format_binding(self._hotkeys[self._capturing_action]))
         self._capturing_action = action
-        self._binding_buttons[action].configure(text="Press keys…")
+        self._binding_buttons[action].set_text("Press keys…", active=True)
 
     def _on_key(self, event):
         if not self._capturing_action:
             return
         if event.keysym in _MODIFIER_KEYSYMS:
-            return  # wait for the real key
+            return
         if event.keysym == "Escape":
-            # Cancel capture, keep old binding.
-            self._binding_buttons[self._capturing_action].configure(
-                text=format_binding(self._hotkeys[self._capturing_action])
-            )
+            self._binding_buttons[self._capturing_action].set_text(
+                format_binding(self._hotkeys[self._capturing_action]))
             self._capturing_action = None
             return
-
-        vk = event.keycode  # Windows: equals the virtual-key code
+        vk = event.keycode
         try:
             gks = ctypes.windll.user32.GetAsyncKeyState
             ctrl = bool(gks(_VK_CONTROL) & 0x8000)
@@ -187,39 +167,54 @@ class ShortcutsWindow:
             alt = bool(gks(_VK_ALT) & 0x8000)
         except Exception:
             ctrl = shift = alt = False
-
         binding = {"ctrl": ctrl, "shift": shift, "alt": alt, "vk": int(vk)}
         binding["label"] = format_binding(binding)
         action = self._capturing_action
         self._hotkeys[action] = binding
-        self._binding_buttons[action].configure(text=binding["label"])
+        self._binding_buttons[action].set_text(binding["label"])
         self._capturing_action = None
 
     def _restore_defaults(self):
         for action, _label in HOTKEY_ACTIONS:
             self._hotkeys[action] = dict(DEFAULT_HOTKEYS[action])
-            self._binding_buttons[action].configure(text=format_binding(self._hotkeys[action]))
+            self._binding_buttons[action].set_text(format_binding(self._hotkeys[action]))
 
     def _save(self):
         new_config = dict(self._config)
-        # Ensure each binding carries a fresh label.
         hotkeys = {}
         for action, _label in HOTKEY_ACTIONS:
             b = dict(self._hotkeys[action])
             b["label"] = format_binding(b)
             hotkeys[action] = b
         new_config["hotkeys"] = hotkeys
-        new_config["toolbar"] = {a: bool(v.get()) for a, v in self._toolbar_vars.items()}
-        new_config["selection_button"] = bool(self._show_toolbar_var.get())
+        new_config["toolbar"] = {a: bool(sw.get()) for a, (sw, _l) in self._toolbar_switches.items()}
+        new_config["selection_button"] = bool(self._show_toolbar.get())
+        self._config = new_config
         try:
             self._on_save(new_config)
         except Exception:
             pass
-        self._close()
+        if self._saved_note is not None:
+            self._saved_note.configure(text="✓ Saved")
+            try:
+                self._parent.after(2000, lambda: self._saved_note.configure(text=""))
+            except Exception:
+                pass
 
-    def _close(self):
-        try:
-            self._window.destroy()
-        except Exception:
-            pass
-        self._window = None
+
+class _KeyButton(tk.Label):
+    """A small dark, clickable binding chip."""
+
+    def __init__(self, parent, text, command=None):
+        super().__init__(parent, text=text, bg=SURFACE_2, fg=TEXT, font=(FONT, 9),
+                         padx=14, pady=6, cursor="hand2", width=16)
+        self._command = command
+        self._active = False
+        self.bind("<Button-1>", lambda _e: command() if command else None)
+        self.bind("<Enter>", lambda _e: self.configure(bg=SURFACE_3) if not self._active else None)
+        self.bind("<Leave>", lambda _e: self.configure(bg=SURFACE_2) if not self._active else None)
+
+    def set_text(self, text, active=False):
+        self._active = active
+        self.configure(text=text, bg=ACCENT if active else SURFACE_2,
+                       fg="#FFFFFF" if active else TEXT)

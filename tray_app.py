@@ -13,8 +13,7 @@ from claude_client import ClaudeClient
 from prompt_builder import PromptBuilder
 from suggestion_window import SuggestionWindow
 from selection_button import SelectionToolbar
-from settings_window import SettingsWindow
-from shortcuts_window import ShortcutsWindow
+from main_window import MainWindow
 from config import (
     load_config, save_config, PROVIDERS, DEFAULT_OPTIONS, ENGINES,
     DEFAULT_ENGINE, TONES, ACCENTS, TONE_KEYS, TONE_LABELS, TOOLBAR_ACTIONS,
@@ -81,6 +80,7 @@ class GrammarTrayApp:
         # (which fires the default action twice) doesn't spawn two of them.
         self._settings_open = False
         self._settings_open_lock = threading.Lock()
+        self._main_window = MainWindow(self)
         self._icon = None
 
     def _build_client(self):
@@ -114,23 +114,57 @@ class GrammarTrayApp:
 
     def _toggle_option(self, name):
         def handler(icon, item):
-            # Tones are mutually exclusive — enabling one clears the others so
-            # the AI gets a single, unambiguous tone instruction.
-            if name in TONE_KEYS and not self.options.get(name):
-                for other in TONE_KEYS:
-                    if other != name:
-                        self.options[other] = False
-
-            self.options[name] = not self.options.get(name, False)
-            self._persist_options()
-            # pystray caches the menu's visual checkmark state — force a refresh
-            # so the on-screen state matches `self.options` after the toggle.
-            try:
-                if self._icon is not None:
-                    self._icon.update_menu()
-            except Exception:
-                pass
+            self._set_option(name, not self.options.get(name, False))
         return handler
+
+    def _set_option(self, name, value):
+        """Set an option to a value, persist, and sync the tray menu + main
+        window. Shared by the tray toggles and the main-window controls so both
+        stay consistent."""
+        value = bool(value)
+        # Tones/accents are mutually exclusive — enabling one clears the others
+        # so the AI gets a single, unambiguous instruction.
+        if name in TONE_KEYS and value:
+            for other in TONE_KEYS:
+                if other != name:
+                    self.options[other] = False
+        self.options[name] = value
+        self._persist_options()
+        self._refresh_menu_and_window()
+
+    def _apply_tone_selection(self, key):
+        """Set the single active tone/accent (or clear all if key is None)."""
+        for k in TONE_KEYS:
+            self.options[k] = (k == key)
+        self._persist_options()
+        self._refresh_menu_and_window()
+
+    def _set_selection_button(self, value):
+        self._enable_selection_button = bool(value)
+        self._config["selection_button"] = self._enable_selection_button
+        save_config(self._config)
+        if not self._enable_selection_button:
+            self._close_selection_button()
+        self._refresh_menu_and_window()
+
+    def _refresh_menu_and_window(self):
+        try:
+            if self._icon is not None:
+                self._icon.update_menu()
+                self._refresh_tooltip()
+        except Exception:
+            pass
+        try:
+            if self._main_window is not None:
+                self._main_window.refresh()
+        except Exception:
+            pass
+
+    def _open_main_window(self, icon=None, item=None):
+        try:
+            self._main_window.open()
+        except Exception:
+            pass
 
     def _persist_options(self):
         try:
@@ -716,63 +750,52 @@ class GrammarTrayApp:
         except Exception:
             pass
 
-    def _open_shortcuts(self, icon=None, item=None):
-        def _run():
-            try:
-                ShortcutsWindow(self._config, lambda cfg: self._apply_runtime_config(cfg)).open()
-            except Exception:
-                pass
-        threading.Thread(target=_run, daemon=True).start()
+    # ---- unified window plumbing (used by main_window's embedded panels) ----
 
-    def _open_settings(self, icon, item):
-        # Guard against pystray's default-action firing twice on a double-click.
-        with self._settings_open_lock:
-            if self._settings_open:
-                return
-            self._settings_open = True
+    def get_config(self):
+        return self._config
 
-        def on_save(new_config):
-            self._apply_runtime_config(new_config, rebuild_client=True)
+    def save_provider_config(self, new_config):
+        """Save callback for the AI Provider panel — persist + rebuild client."""
+        self._apply_runtime_config(new_config, rebuild_client=True)
+        self._main_window.refresh()
 
-        def build_test_client(engine, provider_key, provider_config):
-            """Construct a one-shot client matching what the user has typed
-            into the Settings UI (without requiring Save first)."""
-            try:
-                if engine != "ai":
-                    return None
-                if provider_key == "ollama":
-                    return OllamaClient(model=provider_config.get("model") or "llama3.2:3b")
-                if provider_key == "claude":
-                    return ClaudeClient(
-                        api_key=provider_config.get("api_key", ""),
-                        model=provider_config.get("model") or "claude-sonnet-4-20250514",
-                    )
-                info = PROVIDERS.get(provider_key, PROVIDERS["custom"])
-                base_url = provider_config.get("base_url") or info.get("base_url") or ""
-                return OpenAICompatibleClient(
-                    api_key=provider_config.get("api_key", ""),
-                    model=provider_config.get("model") or info.get("default_model", ""),
-                    base_url=base_url,
-                    provider_name=info.get("label", provider_key),
-                )
-            except Exception:
+    def save_shortcuts_config(self, new_config):
+        """Save callback for the Shortcuts panel — persist hotkeys/toolbar."""
+        self._apply_runtime_config(new_config)
+        self._main_window.refresh()
+
+    def build_test_client(self, engine, provider_key, provider_config):
+        """Construct a one-shot client matching what the user has typed into the
+        AI Provider panel (without requiring Save first)."""
+        try:
+            if engine != "ai":
                 return None
+            if provider_key == "ollama":
+                return OllamaClient(model=provider_config.get("model") or "llama3.2:3b")
+            if provider_key == "claude":
+                return ClaudeClient(
+                    api_key=provider_config.get("api_key", ""),
+                    model=provider_config.get("model") or "claude-sonnet-4-20250514",
+                )
+            info = PROVIDERS.get(provider_key, PROVIDERS["custom"])
+            base_url = provider_config.get("base_url") or info.get("base_url") or ""
+            return OpenAICompatibleClient(
+                api_key=provider_config.get("api_key", ""),
+                model=provider_config.get("model") or info.get("default_model", ""),
+                base_url=base_url,
+                provider_name=info.get("label", provider_key),
+            )
+        except Exception:
+            return None
 
-        settings = SettingsWindow(self._config, on_save, build_test_client=build_test_client)
+    def _open_shortcuts(self, icon=None, item=None):
+        self._main_window.open(tab="shortcuts")
 
-        def _run():
-            try:
-                settings.open()
-            finally:
-                # Settings.mainloop() returned, the window is gone. Clear the
-                # guard so future opens succeed.
-                with self._settings_open_lock:
-                    self._settings_open = False
+    def _open_settings(self, icon=None, item=None):
+        self._main_window.open(tab="provider")
 
-        thread = threading.Thread(target=_run, daemon=True)
-        thread.start()
-
-    def _toggle_pause(self, icon, item):
+    def _toggle_pause(self, icon=None, item=None):
         self._paused_globally = not self._paused_globally
         try:
             if self._paused_globally:
@@ -781,12 +804,7 @@ class GrammarTrayApp:
                 self.monitor.resume()
         except Exception:
             pass
-        try:
-            if self._icon is not None:
-                self._icon.update_menu()
-                self._refresh_tooltip()
-        except Exception:
-            pass
+        self._refresh_menu_and_window()
         self._notify(
             "Verbic",
             "Paused — corrections disabled." if self._paused_globally
@@ -800,45 +818,8 @@ class GrammarTrayApp:
         # Manual check from the tray: show result, proceed with install if newer.
         updater.check_in_background(silent=False, notify=self._notify, ask=lambda v: True)
 
-    def _open_about(self, icon, item):
-        def _show():
-            try:
-                root = tk.Tk()
-                root.title("About Verbic")
-                root.geometry("420x340")
-                root.resizable(False, False)
-                pad = ttk.Frame(root, padding=20)
-                pad.pack(fill="both", expand=True)
-                tk.Label(pad, text="Verbic", font=("Segoe UI", 16, "bold")).pack(anchor="w")
-                tk.Label(pad, text="Write better. Everywhere.", font=("Segoe UI", 10, "italic"), fg="#6366F1").pack(anchor="w")
-                tk.Label(pad, text=f"Version {APP_VERSION}", font=("Segoe UI", 10), fg="#555").pack(anchor="w")
-                tk.Label(pad, text="© Sand Castle LLC", font=("Segoe UI", 9), fg="#777").pack(anchor="w", pady=(0, 10))
-                tk.Label(pad, text=(
-                    "Hotkeys:\n"
-                    "  Ctrl+Shift+G    Fix selected text or whole field\n"
-                    "  Ctrl+Space      Apply suggestion (or fix selection if no overlay)\n"
-                    "  Ctrl+Alt+X      Set highlighted text as writing context\n"
-                    "  Ctrl+Alt+A      Draft an answer using the context"
-                ), justify="left", font=("Segoe UI", 9), fg="#333").pack(anchor="w", pady=(0, 10))
-                tk.Label(
-                    pad,
-                    text=(
-                        "Verbic is provided AS IS, without warranty. Always review "
-                        "automated changes before relying on them. Not for safety-critical, "
-                        "legal, medical, or regulated use without independent review."
-                    ),
-                    justify="left", anchor="w", wraplength=380,
-                    font=("Segoe UI", 8), fg="#7a4f00", bg="#fff8e1",
-                    padx=8, pady=6,
-                ).pack(fill="x", pady=(0, 10))
-                btn_row = ttk.Frame(pad)
-                btn_row.pack(fill="x")
-                ttk.Button(btn_row, text="View License", command=self._open_eula).pack(side="left")
-                ttk.Button(btn_row, text="Close", command=root.destroy).pack(side="right")
-                root.mainloop()
-            except Exception:
-                pass
-        threading.Thread(target=_show, daemon=True).start()
+    def _open_about(self, icon=None, item=None):
+        self._main_window.open(tab="about")
 
     def _on_context_hotkey(self):
         """Ctrl+Alt+X — capture current selection as writing context (runs in thread)."""
@@ -859,12 +840,7 @@ class GrammarTrayApp:
         self._writing_context = ""
         self._config["writing_context"] = ""
         save_config(self._config)
-        try:
-            if self._icon is not None:
-                self._icon.update_menu()
-                self._refresh_tooltip()
-        except Exception:
-            pass
+        self._refresh_menu_and_window()
         self._notify("Verbic", "Writing context cleared.")
 
     def _set_clipboard_as_context(self, icon=None, item=None):
@@ -884,12 +860,7 @@ class GrammarTrayApp:
         save_config(self._config)
         # No toast — the tray menu's "Context: …" line and tooltip already
         # reflect the active context, so a popup on every set is just noise.
-        try:
-            if self._icon is not None:
-                self._icon.update_menu()
-                self._refresh_tooltip()
-        except Exception:
-            pass
+        self._refresh_menu_and_window()
 
         # Speculation mode: eagerly pre-draft the answer so pressing the answer
         # hotkey later returns instantly.
@@ -1140,16 +1111,7 @@ class GrammarTrayApp:
         return "Context: none"
 
     def _toggle_selection_button(self, icon=None, item=None):
-        self._enable_selection_button = not self._enable_selection_button
-        self._config["selection_button"] = self._enable_selection_button
-        save_config(self._config)
-        if not self._enable_selection_button:
-            self._close_selection_button()
-        try:
-            if self._icon is not None:
-                self._icon.update_menu()
-        except Exception:
-            pass
+        self._set_selection_button(not self._enable_selection_button)
 
     def _is_selection_button_on(self, item):
         return self._enable_selection_button
@@ -1215,9 +1177,56 @@ class GrammarTrayApp:
                 pass
         WelcomeWindow(DEFAULT_ENGINE, _on_done).open()
 
+    def _is_provider_configured(self):
+        """True if the saved config already names a usable provider (an API key
+        for key-based providers, or at least a model for Ollama/custom)."""
+        cfg = self._config
+        prov = cfg.get("provider")
+        if not prov:
+            return False
+        pc = (cfg.get("providers", {}) or {}).get(prov, {}) or {}
+        info = PROVIDERS.get(prov, {})
+        if info.get("needs_api_key"):
+            return bool((pc.get("api_key") or "").strip())
+        return bool((pc.get("model") or "").strip())
+
+    def _ensure_provider_setup(self):
+        """Mandatory first-run gate. Returns True if the app may start.
+
+        Shows a blocking Setup window until the user connects and verifies a
+        provider; returns False if they quit without finishing. Installs that are
+        already configured (or that completed setup before) skip straight through.
+        """
+        if self._config.get("setup_complete"):
+            return True
+        # Upgraded install that was already configured before this gate existed:
+        # mark it complete and don't force the user through setup.
+        if self._is_provider_configured():
+            self._config["setup_complete"] = True
+            save_config(self._config)
+            return True
+
+        from setup_window import SetupWindow
+
+        def _on_complete(new_config):
+            self._apply_runtime_config(new_config, rebuild_client=True)
+            self._config["setup_complete"] = True
+            self._config["welcome_seen"] = True
+            save_config(self._config)
+
+        try:
+            return SetupWindow(self._config, self.build_test_client, _on_complete).run()
+        except Exception:
+            # Never hard-lock the user out if the setup UI fails to load.
+            return True
+
     def run(self):
         import os
         import sys
+        # First-run setup is mandatory: don't start the tray/keyboard monitor
+        # until a working AI provider is connected and verified.
+        if not self._ensure_provider_setup():
+            return
         base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
         icon_path = os.path.join(base_path, "icon.png")
         image = Image.open(icon_path)
@@ -1239,6 +1248,7 @@ class GrammarTrayApp:
         )
 
         menu = pystray.Menu(
+            pystray.MenuItem("Open Verbic", self._open_main_window, default=True),
             pystray.MenuItem(
                 lambda item: ("Resume" if self._paused_globally else "Pause") + " corrections",
                 self._toggle_pause,
@@ -1259,7 +1269,7 @@ class GrammarTrayApp:
             pystray.MenuItem("Show button on selection", self._toggle_selection_button, checked=self._is_selection_button_on),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(self._provider_label, None, enabled=False),
-            pystray.MenuItem("Settings", self._open_settings, default=True),
+            pystray.MenuItem("Settings", self._open_settings),
             pystray.MenuItem("Shortcuts & Buttons", self._open_shortcuts),
             pystray.MenuItem("Check for Updates", self._check_updates),
             pystray.Menu.SEPARATOR,

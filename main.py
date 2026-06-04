@@ -12,6 +12,18 @@ if sys.stdout is None:
 if sys.stderr is None:
     sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
+# Give this process an explicit taskbar identity. Without it, Windows groups
+# our windows under the host process (pythonw.exe in dev, or a generic icon)
+# and the taskbar button shows the wrong icon even though the window's own
+# icon is set. Setting an AppUserModelID detaches us so the taskbar uses the
+# Verbic window icon. Must run before any window is created.
+if sys.platform == "win32":
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("SandCastleLLC.Verbic")
+    except Exception:
+        pass
+
 from tray_app import GrammarTrayApp
 
 

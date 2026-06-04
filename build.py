@@ -27,6 +27,7 @@ def build_exe():
         "--icon=icon.ico",
         "--version-file=version_info.txt",
         "--add-data", "icon.png;.",
+        "--add-data", "icon.ico;.",
         "--add-data", "EULA.txt;.",
         "--name", "Verbic",
         "--noconfirm",
