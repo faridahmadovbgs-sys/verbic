@@ -24,8 +24,10 @@ PROVIDERS = {
     },
     "claude": {
         "label": "Claude (Anthropic)",
-        "default_model": "claude-sonnet-4-20250514",
-        "models": ["claude-sonnet-4-20250514", "claude-haiku-4-5-20251001"],
+        "default_model": "claude-sonnet-4-6",
+        # Ordered fastest → most capable. Aliases (no date suffix) so the
+        # picker keeps working across Anthropic snapshot releases.
+        "models": ["claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-8"],
         "needs_api_key": True,
         "base_url": "https://api.anthropic.com",
     },
@@ -129,9 +131,43 @@ ACCENTS = [
     ("jamaican", "Jamaican", "Rewrite in a light, good-natured Jamaican Patois-influenced style — 'irie', 'ya mon', 'soon come', 'respect', 'bredren' — keeping the meaning clear."),
 ]
 
+# Translation targets (the "Translate" tray submenu). Same mechanism as TONES —
+# mutually exclusive with each other AND with the tones/accents. While one is
+# active, every correction and auto-suggestion comes back translated into that
+# language (the translation implicitly fixes grammar too).
+_LANGUAGE_NAMES = [
+    ("spanish", "Spanish"),
+    ("french", "French"),
+    ("german", "German"),
+    ("italian", "Italian"),
+    ("portuguese", "Portuguese"),
+    ("dutch", "Dutch"),
+    ("polish", "Polish"),
+    ("russian", "Russian"),
+    ("ukrainian", "Ukrainian"),
+    ("turkish", "Turkish"),
+    ("azerbaijani", "Azerbaijani"),
+    ("arabic", "Arabic"),
+    ("hindi", "Hindi"),
+    ("chinese", "Chinese (Simplified)"),
+    ("japanese", "Japanese"),
+    ("korean", "Korean"),
+]
+LANGUAGES = [
+    (
+        f"lang_{key}",
+        label,
+        f"Translate the text into natural, fluent {label}, preserving the "
+        f"meaning, tone, names, numbers, and formatting. Output only the "
+        f"{label} translation.",
+    )
+    for key, label in _LANGUAGE_NAMES
+]
+LANGUAGE_KEYS = [key for key, _label, _prompt in LANGUAGES]
+
 # Combined view for everything that treats tones uniformly: mutual exclusion,
 # prompt injection (prompt_builder), and the per-toggle config defaults.
-_ALL_TONES = TONES + ACCENTS
+_ALL_TONES = TONES + ACCENTS + LANGUAGES
 TONE_KEYS = [key for key, _label, _prompt in _ALL_TONES]
 TONE_PROMPTS = {key: prompt for key, _label, prompt in _ALL_TONES}
 TONE_LABELS = {key: label for key, label, _prompt in _ALL_TONES}
@@ -237,6 +273,16 @@ def load_config():
         for name in PROVIDERS:
             if name not in data.get("providers", {}):
                 data["providers"][name] = defaults["providers"][name]
+        # Migrate Claude model ids that Anthropic has retired/deprecated —
+        # the dated Sonnet 4 snapshot stops working in June 2026 and would
+        # otherwise leave existing users with silent API failures.
+        _claude = data["providers"].get("claude") or {}
+        _retired_claude = {
+            "claude-sonnet-4-20250514": "claude-sonnet-4-6",
+            "claude-3-5-haiku-20241022": "claude-haiku-4-5",
+        }
+        if _claude.get("model") in _retired_claude:
+            _claude["model"] = _retired_claude[_claude["model"]]
         # Backfill missing toggle states from defaults so older configs upgrade cleanly.
         saved_options = data.get("options") or {}
         merged_options = dict(DEFAULT_OPTIONS)
@@ -274,6 +320,13 @@ def load_config():
 
         return data
     except Exception:
+        # Don't lose the user's settings/API keys to a corrupt or unreadable
+        # file: set it aside for manual recovery before the next save_config
+        # writes defaults over the original path.
+        try:
+            os.replace(path, path + ".bad")
+        except Exception:
+            pass
         return defaults
 
 
@@ -290,10 +343,20 @@ def _migrate_old_config(old):
 
 
 def save_config(config):
+    # Atomic write: a crash or power loss mid-write must never truncate the
+    # only copy of the user's settings and API keys. Write to a temp file,
+    # flush to disk, then swap it into place.
     path = _config_path()
+    tmp_path = path + ".tmp"
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
     except Exception:
-        pass
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass

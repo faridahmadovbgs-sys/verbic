@@ -1,4 +1,4 @@
-from config import TONE_PROMPTS
+from config import TONE_PROMPTS, LANGUAGE_KEYS
 
 
 class PromptBuilder:
@@ -32,6 +32,13 @@ class PromptBuilder:
                 f'"""\n{context}\n"""\n\n'
             )
 
+        # Translations legitimately change the character count (Chinese or
+        # Japanese compress Latin text to a fraction of its length), so the
+        # length rule only applies when no target language is selected.
+        translating = any(options.get(key) for key in LANGUAGE_KEYS)
+        length_rule = "" if translating else \
+            "- Output length should be similar to input length.\n"
+
         return (
             f"You are a text correction assistant. Apply these transformations:\n"
             f"{instruction_block}\n\n"
@@ -42,7 +49,7 @@ class PromptBuilder:
             f"- Do NOT wrap your answer in quotes, triple quotes, code fences, or any delimiter.\n"
             f"- Do NOT add preambles like \"Here is\", \"The corrected version\", or any explanation.\n"
             f"- Do NOT include any surrounding context.\n"
-            f"- Output length should be similar to input length.\n\n"
+            f"{length_rule}\n"
             f"Snippet to correct:\n"
             f"<<<\n{text}\n>>>"
         )

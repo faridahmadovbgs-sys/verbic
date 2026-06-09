@@ -16,7 +16,13 @@ def read_focused_text(timeout_seconds=1.5):
     def worker():
         try:
             import uiautomation as auto
-            with _uia_lock:
+            # A previous worker hung inside a misbehaving app's UIA provider
+            # still holds the lock. Give up instead of queuing behind it —
+            # every blocked daemon thread would otherwise leak until the
+            # process exits.
+            if not _uia_lock.acquire(timeout=2.0):
+                return
+            try:
                 control = auto.GetFocusedControl()
                 if control is None:
                     return
@@ -38,6 +44,8 @@ def read_focused_text(timeout_seconds=1.5):
                                 result["text"] = text
                     except Exception:
                         pass
+            finally:
+                _uia_lock.release()
         except Exception:
             pass
 

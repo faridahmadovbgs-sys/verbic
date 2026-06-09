@@ -22,7 +22,7 @@ from theme import (
     SECTION, ACCENT, ACCENT_HI, GOOD, WARN, FONT,
     GradientBadge, PillButton, ToggleSwitch, ScrollFrame, make_card,
 )
-from config import TONES, ACCENTS, PROVIDERS
+from config import TONES, ACCENTS, LANGUAGES, PROVIDERS
 from settings_window import SettingsPanel
 from shortcuts_window import ShortcutsPanel
 from version import APP_VERSION
@@ -59,7 +59,8 @@ class MainWindow:
         self._shortcuts_panel = None
         self._tone_choices = [(_NONE, None)] \
             + [(label, key) for key, label, _p in TONES] \
-            + [(label, key) for key, label, _p in ACCENTS]
+            + [(label, key) for key, label, _p in ACCENTS] \
+            + [(f"Translate → {label}", key) for key, label, _p in LANGUAGES]
         self._label_to_key = {label: key for label, key in self._tone_choices}
         self._key_to_label = {key: label for label, key in self._tone_choices if key}
 

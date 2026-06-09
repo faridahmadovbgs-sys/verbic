@@ -252,11 +252,16 @@ class SettingsPanel:
                     err = None
 
                 def _show():
-                    if result is None:
-                        test_output.configure(text=f"✕  Failed: {err or 'provider returned no result'}",
-                                              fg=DANGER, bg=SURFACE_2)
-                    else:
-                        test_output.configure(text=f"✓  {result}", fg=GOOD, bg=SURFACE_2)
+                    try:
+                        if result is None:
+                            test_output.configure(text=f"✕  Failed: {err or 'provider returned no result'}",
+                                                  fg=DANGER, bg=SURFACE_2)
+                        else:
+                            test_output.configure(text=f"✓  {result}", fg=GOOD, bg=SURFACE_2)
+                    except Exception:
+                        # The settings window was closed before the test
+                        # finished; the label no longer exists.
+                        pass
                 try:
                     self._parent.after(0, _show)
                 except Exception:

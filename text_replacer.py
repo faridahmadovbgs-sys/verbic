@@ -172,4 +172,9 @@ class TextReplacer:
         # I tested (Notepad, VS Code, Chrome, Slack, Word).
         time.sleep(0.08)
         if old_clip is not None and old_clip != text:
-            _set_clipboard_text(old_clip)
+            # The paste target (or a clipboard manager reacting to it) can
+            # briefly hold the clipboard open right after Ctrl+V; one short
+            # retry rescues the user's original clipboard in that case.
+            if not _set_clipboard_text(old_clip):
+                time.sleep(0.05)
+                _set_clipboard_text(old_clip)

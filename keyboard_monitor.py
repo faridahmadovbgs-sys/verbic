@@ -93,6 +93,10 @@ class KeyboardMonitor:
         self._mouse_listener = None
         self._paused = False
         self._text_timer = None
+        # Guards _text_timer: cancel/schedule race between the pynput listener
+        # thread and the tray thread (pause/consume) could otherwise leave a
+        # stale timer running and pop a suggestion after it was cancelled.
+        self._timer_lock = threading.Lock()
         self._last_fg_hwnd = None
         # Drag-to-select tracking for the floating context button.
         self._press_pos = None
@@ -160,6 +164,10 @@ class KeyboardMonitor:
             return "".join(self._buffer), self._char_count
 
     def _cancel_text_timer(self):
+        with self._timer_lock:
+            self._cancel_text_timer_locked()
+
+    def _cancel_text_timer_locked(self):
         if self._text_timer is not None:
             try:
                 self._text_timer.cancel()
@@ -168,12 +176,13 @@ class KeyboardMonitor:
             self._text_timer = None
 
     def _schedule_text_ready(self):
-        self._cancel_text_timer()
-        if self._paused or self._on_text_ready is None:
-            return
-        self._text_timer = threading.Timer(0.8, self._fire_text_ready)
-        self._text_timer.daemon = True
-        self._text_timer.start()
+        with self._timer_lock:
+            self._cancel_text_timer_locked()
+            if self._paused or self._on_text_ready is None:
+                return
+            self._text_timer = threading.Timer(0.8, self._fire_text_ready)
+            self._text_timer.daemon = True
+            self._text_timer.start()
 
     def _fire_text_ready(self):
         if self._paused:

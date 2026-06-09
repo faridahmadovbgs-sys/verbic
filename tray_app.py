@@ -16,7 +16,8 @@ from selection_button import SelectionToolbar
 from main_window import MainWindow
 from config import (
     load_config, save_config, PROVIDERS, DEFAULT_OPTIONS, ENGINES,
-    DEFAULT_ENGINE, TONES, ACCENTS, TONE_KEYS, TONE_LABELS, TOOLBAR_ACTIONS,
+    DEFAULT_ENGINE, TONES, ACCENTS, LANGUAGES, LANGUAGE_KEYS, TONE_KEYS,
+    TONE_LABELS, TOOLBAR_ACTIONS,
 )
 from welcome_window import WelcomeWindow
 from text_reader import read_focused_text
@@ -360,12 +361,16 @@ class GrammarTrayApp:
         if any(head.startswith(m) for m in refusal_markers):
             return False
         # Length sanity: a correction shouldn't be a tenth or ten times the
-        # input. Either is a model gone off the rails.
+        # input. Either is a model gone off the rails. Exception: an active
+        # translation legitimately changes the character count (Chinese /
+        # Japanese compress Latin text to a fraction of its length), so the
+        # truncation floor only applies when no language is selected.
         olen = max(len(original.strip()), 1)
         clen = len(c)
         if clen > olen * 8 + 40:
             return False
-        if olen >= 20 and clen < olen // 4:
+        translating = any(self.options.get(k) for k in LANGUAGE_KEYS)
+        if not translating and olen >= 20 and clen < olen // 4:
             return False
         return True
 
@@ -1252,6 +1257,12 @@ class GrammarTrayApp:
                 for key, label, _prompt in ACCENTS
             ]
         )
+        translate_submenu = pystray.Menu(
+            *[
+                pystray.MenuItem(label, self._toggle_option(key), checked=self._is_checked(key))
+                for key, label, _prompt in LANGUAGES
+            ]
+        )
 
         menu = pystray.Menu(
             pystray.MenuItem("Open Verbic", self._open_main_window, default=True),
@@ -1264,6 +1275,7 @@ class GrammarTrayApp:
             pystray.MenuItem("Fix Grammar", self._toggle_option("grammar"), checked=self._is_checked("grammar")),
             pystray.MenuItem("Tone", tone_submenu),
             pystray.MenuItem("Accents", accents_submenu),
+            pystray.MenuItem("Translate", translate_submenu),
             pystray.MenuItem("Expand", self._toggle_option("expand"), checked=self._is_checked("expand")),
             pystray.MenuItem("Auto Suggest (typing)", self._toggle_option("auto_suggest"), checked=self._is_checked("auto_suggest")),
             pystray.MenuItem("Predictive (Flow) Mode", self._toggle_option("speculation"), checked=self._is_checked("speculation")),

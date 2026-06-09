@@ -68,11 +68,22 @@ def _fetch_latest(timeout=10):
 def _download(url, dest, timeout=120):
     req = urllib.request.Request(url, headers={"User-Agent": _UA})
     with urllib.request.urlopen(req, timeout=timeout) as resp, open(dest, "wb") as out:
+        expected = resp.headers.get("Content-Length")
+        written = 0
         while True:
             chunk = resp.read(64 * 1024)
             if not chunk:
                 break
             out.write(chunk)
+            written += len(chunk)
+    # Never hand a truncated .exe to subprocess — a server that closes the
+    # connection early doesn't always raise, it just stops sending.
+    if expected and written != int(expected):
+        try:
+            os.remove(dest)
+        except OSError:
+            pass
+        raise IOError(f"Update download incomplete ({written}/{expected} bytes)")
 
 
 def check_and_notify(notify=None, timeout=10):

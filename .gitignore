@@ -10,3 +10,4 @@ installer_output/
 config.json
 .claude/
 *.log
+@AutomationLog.txt
