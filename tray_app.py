@@ -20,6 +20,7 @@ from config import (
     TONE_LABELS, TOOLBAR_ACTIONS,
 )
 from welcome_window import WelcomeWindow
+from style_picker import StylePicker
 from text_reader import read_focused_text
 from focus_watcher import FocusWatcher
 import updater
@@ -164,6 +165,12 @@ class GrammarTrayApp:
     def _open_main_window(self, icon=None, item=None):
         try:
             self._main_window.open()
+        except Exception:
+            pass
+
+    def _open_style_picker(self, icon=None, item=None):
+        try:
+            StylePicker(self).open()
         except Exception:
             pass
 
@@ -1279,6 +1286,7 @@ class GrammarTrayApp:
             ),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Fix Grammar", self._toggle_option("grammar"), checked=self._is_checked("grammar")),
+            pystray.MenuItem("Style Picker…", self._open_style_picker),
             pystray.MenuItem("Tone", tone_submenu),
             pystray.MenuItem("Accents", accents_submenu),
             pystray.MenuItem("Translate", translate_submenu),
