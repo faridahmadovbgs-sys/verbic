@@ -1,11 +1,11 @@
-; Verbic — Inno Setup script
-; Build:  iscc installer.iss   →   installer_output\VerbicSetup.exe
+﻿; Verbic â€” Inno Setup script
+; Build:  iscc installer.iss   â†’   installer_output\VerbicSetup.exe
 ;
 ; Note: MyAppId GUID is intentionally stable across renames so users who
 ; installed the previous "Grammar Tool" name upgrade cleanly to Verbic.
 
 #define MyAppName       "Verbic"
-#define MyAppVersion    "1.3.2"
+#define MyAppVersion    "1.4.0"
 #define MyAppPublisher  "Sand Castle LLC"
 #define MyAppExeName    "Verbic.exe"
 #define MyAppId         "{{2A8E1B4F-7B3C-4C26-9D1E-9F3F2C7B0A61}}"
@@ -23,7 +23,7 @@ VersionInfoCopyright=Copyright (C) {#MyAppPublisher}
 VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion={#MyAppVersion}.0
 ; Install for all users into Program Files (a known, reviewable corporate
-; directory) — NOT a user-space / Temp path. Requires admin/UAC, which is the
+; directory) â€” NOT a user-space / Temp path. Requires admin/UAC, which is the
 ; expected behavior for managed endpoints (per security review).
 DefaultDirName={commonpf}\Verbic
 DefaultGroupName={#MyAppName}
