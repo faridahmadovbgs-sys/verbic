@@ -553,15 +553,18 @@ class GrammarTrayApp:
 
     def _active_mode_label(self):
         """Human-readable label for the overlay header describing what kind of
-        edit is being suggested (Grammar, a tone, Expand, or a combination)."""
+        edit is being suggested (Grammar, a tone, a translation, Expand, or a
+        combination)."""
         parts = []
-        if self.options.get("grammar"):
+        active_key = next((k for k in TONE_KEYS if self.options.get(k)), None)
+        translating = active_key in LANGUAGE_KEYS if active_key else False
+        # Translation implies the grammar fix — "Grammar · Translate" would
+        # just be noise in the header.
+        if self.options.get("grammar") and not translating:
             parts.append("Grammar")
-        tone_names = TONE_LABELS
-        for key in TONE_KEYS:
-            if self.options.get(key):
-                parts.append(tone_names.get(key, key.title()))
-                break
+        if active_key:
+            name = TONE_LABELS.get(active_key, active_key.title())
+            parts.append(f"Translate → {name}" if translating else name)
         if self.options.get("expand"):
             parts.append("Expand")
         return " · ".join(parts) if parts else "Suggested edit"
@@ -982,10 +985,13 @@ class GrammarTrayApp:
         labels = {key: label for key, label in TOOLBAR_ACTIONS}
         # Surface the active tone on the Fix button so it's clear it reformats
         # in the configured tone (e.g. "✓ Fix · Professional").
-        tone_names = TONE_LABELS
-        active_tone = next((tone_names[k] for k in TONE_KEYS if self.options.get(k)), None)
-        if active_tone:
-            labels["fix_grammar"] = f"✓ Fix · {active_tone}"
+        active_key = next((k for k in TONE_KEYS if self.options.get(k)), None)
+        if active_key:
+            name = TONE_LABELS.get(active_key, active_key.title())
+            if active_key in LANGUAGE_KEYS:
+                labels["fix_grammar"] = f"⇄ Translate · {name}"
+            else:
+                labels["fix_grammar"] = f"✓ Fix · {name}"
         handlers = {
             "set_context": lambda: self._capture_context_from_selection(selection),
             "draft_answer": lambda: self._draft_answer(selection, anchor=anchor),
