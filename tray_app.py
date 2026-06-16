@@ -906,29 +906,40 @@ class GrammarTrayApp:
         a worker thread so the mouse listener never blocks."""
         if self._paused_globally or not self._enable_selection_button:
             return
+        # A deliberate drag supersedes a lingering suggestion overlay; an
+        # ambiguous double/triple-click defers to it so the toolbar doesn't
+        # fight an active suggestion.
         if self._suggestion_window is not None:
-            return
+            if kind != "drag":
+                return
+            try:
+                self._suggestion_window.close()
+            except Exception:
+                pass
         threading.Thread(target=self._maybe_show_toolbar, args=(x, y, kind), daemon=True).start()
 
     def _maybe_show_toolbar(self, x, y, kind):
-        # Read the selection via UI Automation only — NO clipboard. Capturing
-        # via a synthetic Ctrl+C on every selection hammered the Windows
-        # clipboard and broke the user's own copy/paste (contention + the
-        # restore step clobbering a fresh copy). UIA reads the selected text
-        # without touching the clipboard at all.
-        selection = self._get_selection_text_uia()
-        sel = selection.strip() if (selection and selection.strip()) else None
-
-        # For a double/triple-click, UIA text is the gate: a word/line selection
-        # gives text → show; a click on an icon/button gives nothing → skip.
-        if kind == "click" and not sel:
+        # A drag is a deliberate text gesture — show the toolbar IMMEDIATELY
+        # rather than waiting on a UI Automation read first. That read can take
+        # up to a second on Chrome/Electron (their UIA provider lazily builds
+        # the tree), and the delay made the toolbar feel like it never popped
+        # up. The toolbar's actions capture the selected text at click time
+        # (UIA-first, clipboard only as a fallback), so we don't need it now.
+        if kind == "drag":
+            _dlog("tray", "toolbar: show (drag) immediate")
+            self._show_selection_button(x, y, None)
             return
 
-        # A drag is a deliberate text gesture. If UIA couldn't read the text
-        # (some apps expose no TextPattern), still show the toolbar — the action
-        # will capture via the clipboard at click time, which is a single,
-        # deliberate event, NOT something that fires on every selection.
-        _dlog("tray", f"toolbar: show ({kind}) uia={'yes' if sel else 'no'}")
+        # A double/triple-click also fires on icons, buttons, and list items, so
+        # require a real text selection — read without touching the clipboard —
+        # before showing the toolbar. The read has NO clipboard side effects
+        # (a synthetic Ctrl+C on every selection would clobber the user's own
+        # copy/paste).
+        selection = self._get_selection_text_uia(timeout=1.0)
+        sel = selection.strip() if (selection and selection.strip()) else None
+        if not sel:
+            return
+        _dlog("tray", "toolbar: show (click) uia=yes")
         self._show_selection_button(x, y, sel)
 
     def _get_selection_text_uia(self, timeout=0.6):
