@@ -62,7 +62,18 @@ Source: "EULA.txt"; DestDir: "{app}"; Flags: ignoreversion
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
-Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: startupicon
+
+[Registry]
+; Auto-start uses the per-user Run key, which is also what the app's own
+; "Start Verbic when Windows starts" toggle writes (General tab / tray menu).
+; One mechanism means the two can never disagree, and Windows never launches
+; two copies. Up to v1.4.2 this was a {userstartup} shortcut instead; the app
+; detects that shortcut and removes it the first time the toggle is used.
+; Nothing is written when the task is unchecked, so an in-place update never
+; clears auto-start that the user switched on inside the app.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#MyAppName}"; ValueData: """{app}\{#MyAppExeName}"""; Tasks: startupicon; Flags: uninsdeletevalue
+; Clean the value up on uninstall even when the app (not Setup) wrote it.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "{#MyAppName}"; Flags: uninsdeletevalue
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent

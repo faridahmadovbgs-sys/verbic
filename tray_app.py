@@ -21,6 +21,7 @@ from config import (
 )
 from welcome_window import WelcomeWindow
 from style_picker import StylePicker
+import autostart
 from text_reader import read_focused_text
 from focus_watcher import FocusWatcher
 import updater
@@ -148,6 +149,26 @@ class GrammarTrayApp:
         if not self._enable_selection_button:
             self._close_selection_button()
         self._refresh_menu_and_window()
+
+    def is_autostart_enabled(self):
+        """Whether Windows launches Verbic at logon. Read live from the registry
+        (see autostart) rather than mirrored into config.json, so the toggle
+        still tells the truth if the user disables Verbic from Task Manager."""
+        try:
+            return autostart.is_enabled()
+        except Exception:
+            return False
+
+    def _set_autostart(self, value):
+        """Turn logon auto-start on/off. Returns False if Windows refused."""
+        try:
+            ok = autostart.set_enabled(bool(value))
+        except Exception:
+            ok = False
+        if not ok:
+            self._notify("Verbic", "Couldn't change the Windows startup setting.")
+        self._refresh_menu_and_window()
+        return ok
 
     def _refresh_menu_and_window(self):
         try:
@@ -1145,6 +1166,12 @@ class GrammarTrayApp:
     def _is_selection_button_on(self, item):
         return self._enable_selection_button
 
+    def _toggle_autostart(self, icon=None, item=None):
+        self._set_autostart(not self.is_autostart_enabled())
+
+    def _is_autostart_on(self, item):
+        return self.is_autostart_enabled()
+
     def _quit(self, icon, item):
         self.monitor.stop()
         try:
@@ -1262,6 +1289,12 @@ class GrammarTrayApp:
         # until a working AI provider is connected and verified.
         if not self._ensure_provider_setup():
             return
+        # If auto-start is on, make sure the saved command still points at this
+        # executable — an in-place update can move the install folder.
+        try:
+            autostart.refresh()
+        except Exception:
+            pass
         base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
         icon_path = os.path.join(base_path, "icon.png")
         image = Image.open(icon_path)
@@ -1314,6 +1347,7 @@ class GrammarTrayApp:
             pystray.MenuItem(self._provider_label, None, enabled=False),
             pystray.MenuItem("Settings", self._open_settings),
             pystray.MenuItem("Shortcuts & Buttons", self._open_shortcuts),
+            pystray.MenuItem("Start with Windows", self._toggle_autostart, checked=self._is_autostart_on),
             pystray.MenuItem("Check for Updates", self._check_updates),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("About", self._open_about),

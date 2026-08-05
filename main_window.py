@@ -50,6 +50,7 @@ class MainWindow:
         self._status_dot = None
         self._pause_btn = None
         self._provider_label = None
+        self._autostart_note = None
         # Tabs.
         self._panels = {}        # key -> ScrollFrame
         self._nav_items = {}     # key -> (frame, bar, label)
@@ -289,6 +290,15 @@ class MainWindow:
         self._toggle_row(b, "selection_button", "Show action toolbar when I select text",
                          self._app._enable_selection_button)
 
+        card, b = make_card(body, "Startup")
+        card.pack(**pad)
+        self._toggle_row(b, "start_with_windows", "Start Verbic when Windows starts",
+                         self._app.is_autostart_enabled())
+        tk.Label(b, text="Verbic launches straight to the system tray — no window pops up.",
+                 bg=SURFACE, fg=MUTED, font=(FONT, 8)).pack(anchor="w", pady=(4, 0))
+        self._autostart_note = tk.Label(b, text="", bg=SURFACE, fg=WARN, font=(FONT, 8))
+        self._autostart_note.pack(anchor="w")
+
         card, b = make_card(body, "AI Provider")
         card.pack(**{**pad, "pady": (0, 20)})
         self._provider_label = tk.Label(b, text=self._provider_text(), bg=SURFACE,
@@ -364,6 +374,11 @@ class MainWindow:
     def _on_toggle(self, name, value):
         if name == "selection_button":
             self._app._set_selection_button(bool(value))
+        elif name == "start_with_windows":
+            ok = self._app._set_autostart(bool(value))
+            if self._autostart_note is not None:
+                self._autostart_note.configure(
+                    text="" if ok else "Windows refused the change — try again as this user.")
         else:
             self._app._set_option(name, bool(value))
 
@@ -401,6 +416,8 @@ class MainWindow:
             for name, sw in self._toggles.items():
                 if name == "selection_button":
                     sw.set(bool(self._app._enable_selection_button))
+                elif name == "start_with_windows":
+                    sw.set(bool(self._app.is_autostart_enabled()))
                 else:
                     sw.set(bool(opt.get(name)))
             active = next((k for _l, k in self._tone_choices if k and opt.get(k)), None)
